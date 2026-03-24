@@ -7,6 +7,34 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true });
 
+// ── 필수 환경변수 검증 (Render 배포 실패 방지) ─────────────────────
+const REQUIRED_ENV = ['OPENAI_API_KEY'];
+const MISSING_ENV = REQUIRED_ENV.filter(k => !process.env[k]);
+if (MISSING_ENV.length) {
+    console.error('');
+    console.error('╔══════════════════════════════════════════════╗');
+    console.error('║  ❌  FATAL: Required ENV vars are missing    ║');
+    console.error('╠══════════════════════════════════════════════╣');
+    MISSING_ENV.forEach(k => console.error(`║  →  ${k.padEnd(40)}║`));
+    console.error('╠══════════════════════════════════════════════╣');
+    console.error('║  Set these in Render → Environment Variables ║');
+    console.error('╚══════════════════════════════════════════════╝');
+    console.error('');
+    process.exit(1);
+}
+
+// Optional env 경고 (기능 제한)
+const OPTIONAL_ENV = ['TELEGRAM_BOT_TOKEN', 'FINNHUB_API_KEY', 'TWELVEDATA_API_KEY',
+    'ALPHAVANTAGE_API_KEY', 'FMP_API_KEY', 'NEWS_API_KEY'];
+const missingOpt = OPTIONAL_ENV.filter(k => !process.env[k]);
+if (missingOpt.length) {
+    console.warn(`⚠️  Optional ENV missing (limited features): ${missingOpt.join(', ')}`);
+}
+
+const maskedKey = process.env.OPENAI_API_KEY.substring(0, 7) + '...';
+console.log(`✅ OPENAI_API_KEY: ${maskedKey} confirmed`);
+
+
 const express = require('express');
 const cors = require('cors');
 

@@ -1,34 +1,26 @@
 const { OpenAI } = require('openai');
 const path = require('path');
 
-// Ensure dotenv is loaded before initializing the client
-// We use an absolute path to avoid directory-dependent issues
-require('dotenv').config({ path: path.join(__dirname, '../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../.env'), override: true });
 
 const apiKey = process.env.OPENAI_API_KEY;
 
-// Force override because shell environment might have an old key
-require('dotenv').config({ 
-    path: path.join(__dirname, '../.env'),
-    override: true 
-});
-
-const newApiKey = process.env.OPENAI_API_KEY;
-
-if (!newApiKey) {
-    console.error('❌ [OpenAI-Client] OPENAI_API_KEY is missing in process.env');
-} else {
-    // Mask the key for security in logs
-    const maskedKey = newApiKey.substring(0, 10) + '...' + newApiKey.substring(newApiKey.length - 4);
-    if (apiKey && apiKey !== newApiKey) {
-        console.log(`⚠️ [OpenAI-Client] Overriding shell key (...${apiKey.slice(-4)}) with .env key (...${newApiKey.slice(-4)})`);
-    }
-    console.log(`📡 [OpenAI-Client] Initializing with key: ${maskedKey}`);
+if (!apiKey) {
+    // api-server.js에서 이미 체크해서 종료했어야 하지만, 직접 require된 경우 대비
+    throw new Error(
+        '[OpenAI-Client] OPENAI_API_KEY is not set.\n' +
+        '  → Set it in Render → Environment Variables\n' +
+        '  → Or add it to your .env file'
+    );
 }
 
-const client = new OpenAI({
-    apiKey: newApiKey,
-});
+const maskedKey = apiKey.substring(0, 10) + '...' + apiKey.substring(apiKey.length - 4);
+console.log(`📡 [OpenAI-Client] Initialized with key: ${maskedKey}`);
+
+const client = new OpenAI({ apiKey });
+
+module.exports = client;
+
 
 /**
  * Common OpenAI client instance for the entire project.
