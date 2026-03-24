@@ -63,11 +63,38 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.API_PORT || 3001;
+// Render는 PORT 환경변수를 자동 주입 — API_PORT fallback 유지
+const PORT = process.env.PORT || process.env.API_PORT || 3001;
+
+// ── 루트 / 안내 응답 ───────────────────────────────────────────────
+app.get('/', (req, res) => {
+    res.json({
+        ok: true,
+        service: 'yeri-project',
+        version: '1.0.0',
+        status: 'running',
+        endpoints: [
+            'GET  /health',
+            'GET  /api/health',
+            'POST /api/chat',
+            'GET  /api/watchlist/:chatId',
+            'POST /api/watchlist/:chatId/add',
+            'POST /api/watchlist/:chatId/remove',
+            'POST /api/watchlist/:chatId/style',
+            'GET  /api/briefing/:chatId',
+            'POST /api/portfolio/analyze',
+            'GET  /api/market',
+        ],
+    });
+});
 
 // ── 헬스 체크 ─────────────────────────────────────────────────────
+app.get('/health', (req, res) => {
+    res.json({ ok: true, service: 'yeri-project', status: 'running', time: new Date().toISOString() });
+});
+
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', time: new Date().toISOString() });
+    res.json({ ok: true, status: 'running', time: new Date().toISOString() });
 });
 
 // ── 채팅: 메시지 처리 ─────────────────────────────────────────────
@@ -258,8 +285,11 @@ app.get('/api/market', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`🚀 API Server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 API Server running on port ${PORT}`);
+    console.log(`   → Root:   https://yeri-project.onrender.com/`);
+    console.log(`   → Health: https://yeri-project.onrender.com/health`);
+    console.log(`   → Chat:   POST /api/chat`);
 });
 
 module.exports = app;
