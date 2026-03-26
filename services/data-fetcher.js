@@ -250,6 +250,9 @@ async function getTechnicalIndicators(ticker) {
         const macdV = macdR.status === 'fulfilled' ? macdR.value.data?.values?.[0] : null;
         const vols = volR.status === 'fulfilled' ? volR.value.data?.values?.map(v => parseInt(v.volume)).filter(Boolean) : null;
         const stochV = stochR.status === 'fulfilled' ? stochR.value.data?.values?.[0] : null;
+
+        if (!rsiNum && !macdV && !val(ema20R, 'ema')) return null; // API 호출이 완전히 막힌 경우 (Rate Limit 등) -> 다음 Fallback으로 넘기기
+
         return {
             rsi: rsiNum,
             rsiSignal: rsiNum ? (rsiNum < 30 ? '과매도' : rsiNum > 70 ? '과매수' : '중립') : 'N/A',
@@ -281,6 +284,8 @@ async function getTechnicalIndicators(ticker) {
         if (!d) return null;
         const latest = Object.values(d)[0];
         const rsiNum = parseFloat(latest?.RSI);
+        if (!rsiNum || isNaN(rsiNum)) return null;
+        
         return {
             rsi: rsiNum,
             rsiSignal: rsiNum < 30 ? '과매도' : rsiNum > 70 ? '과매수' : '중립',
@@ -780,14 +785,11 @@ function computeDataReliability(data) {
         tier = 'FULL';
         label = '전체 분석 가능';
         emoji = '🟢';
-    } else if (pct >= 40) {
+    } else {
+        // 가격 데이터만 있다면 최소한 부분 분석(PARTIAL)은 보장
         tier = 'PARTIAL';
         label = '부분 분석 가능';
         emoji = '🟡';
-    } else {
-        tier = 'NO_DATA';
-        label = '분석 불가';
-        emoji = '🔴';
     }
 
     const reliability = pct >= 80 ? 'HIGH' : pct >= 50 ? 'MEDIUM' : 'LOW';

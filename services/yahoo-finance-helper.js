@@ -53,6 +53,42 @@ function calcEMA(closes, period) {
     return parseFloat(ema.toFixed(2));
 }
 
+// MACD 계산 (12, 26, 9)
+function calcMACD(closes) {
+    if (!closes || closes.length < 35) return null;
+    const ema12 = [];
+    const ema26 = [];
+    const k12 = 2 / 13;
+    const k26 = 2 / 27;
+    let e12 = closes.slice(0, 12).reduce((a, b) => a + b, 0) / 12;
+    let e26 = closes.slice(0, 26).reduce((a, b) => a + b, 0) / 26;
+    for (let i = 12; i < closes.length; i++) {
+        e12 = (closes[i] - e12) * k12 + e12;
+        ema12[i] = e12;
+    }
+    for (let i = 26; i < closes.length; i++) {
+        e26 = (closes[i] - e26) * k26 + e26;
+        ema26[i] = e26;
+    }
+    const macdLine = [];
+    for (let i = 26; i < closes.length; i++) {
+        macdLine.push(ema12[i] - ema26[i]);
+    }
+    const signalK = 2 / 10;
+    let signal = macdLine.slice(0, 9).reduce((a, b) => a + b, 0) / 9;
+    for (let j = 9; j < macdLine.length; j++) {
+        signal = (macdLine[j] - signal) * signalK + signal;
+    }
+    const macdFinal = macdLine[macdLine.length - 1];
+    const hist = macdFinal - signal;
+    return {
+        macd: parseFloat(macdFinal).toFixed(4),
+        signal: parseFloat(signal).toFixed(4),
+        hist: parseFloat(hist).toFixed(4),
+        trend: hist >= 0 ? '상승 모멘텀 ↑' : '하락 모멘텀 ↓'
+    };
+}
+
 // ─────────────────────────────────────────────
 // 현재가 데이터
 // ─────────────────────────────────────────────
@@ -143,7 +179,7 @@ async function getYahooTechnicals(ticker) {
         return {
             rsi,
             rsiSignal: rsi ? (rsi < 30 ? '과매도' : rsi > 70 ? '과매수' : '중립') : 'N/A',
-            macd:      null, // 로컬 MACD는 복잡하므로 생략
+            macd:      calcMACD(closes),
             ema20:     ema20?.toString() ?? null,
             ema50:     ema50?.toString() ?? null,
             sma200:    sma200?.toString() ?? null,

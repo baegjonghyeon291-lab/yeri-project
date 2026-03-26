@@ -91,6 +91,8 @@ const US_COMPANY_MAP = {
     'apple': { ticker: 'AAPL', name: 'Apple' },
     '아이폰회사': { ticker: 'AAPL', name: 'Apple' },
     '아이폰': { ticker: 'AAPL', name: 'Apple' },
+    '아이렌': { ticker: 'AAPL', name: 'Apple' },
+    '애플이': { ticker: 'AAPL', name: 'Apple' },
     '테슬라': { ticker: 'TSLA', name: 'Tesla' },
     'tesla': { ticker: 'TSLA', name: 'Tesla' },
     '엔비디아': { ticker: 'NVDA', name: 'NVIDIA' },
@@ -300,6 +302,21 @@ const US_COMPANY_MAP = {
     '빅베어': { ticker: 'BBAI', name: 'BigBear.ai' },
     'bigbear': { ticker: 'BBAI', name: 'BigBear.ai' },
     'bbai': { ticker: 'BBAI', name: 'BigBear.ai' },
+    'babi': { ticker: 'BBAI', name: 'BigBear.ai' },
+    '사운드하운드': { ticker: 'SOUN', name: 'SoundHound AI' },
+    'soundhound': { ticker: 'SOUN', name: 'SoundHound AI' },
+    '사운': { ticker: 'SOUN', name: 'SoundHound AI' },
+    '사운드': { ticker: 'SOUN', name: 'SoundHound AI' },
+    'soun': { ticker: 'SOUN', name: 'SoundHound AI' },
+    '아이온큐': { ticker: 'IONQ', name: 'IonQ' },
+    'ionq': { ticker: 'IONQ', name: 'IonQ' },
+    '아이온': { ticker: 'IONQ', name: 'IonQ' },
+    'c3ai': { ticker: 'AI', name: 'C3.ai' },
+    'ai': { ticker: 'AI', name: 'C3.ai' },
+    'smr': { ticker: 'SMR', name: 'NuScale Power' },
+    '누스케일': { ticker: 'SMR', name: 'NuScale Power' },
+    'rklb': { ticker: 'RKLB', name: 'Rocket Lab' },
+    '로켓랩': { ticker: 'RKLB', name: 'Rocket Lab' },
     // ── 플랫폼 (추가) ──
     '도어대시': { ticker: 'DASH', name: 'DoorDash' },
     'doordash': { ticker: 'DASH', name: 'DoorDash' },
@@ -402,6 +419,8 @@ const ETF_MAP = {
     '러셀etf':  { ticker: 'IWM',  name: 'iShares Russell 2000 ETF' },
     'soxx':   { ticker: 'SOXX', name: 'iShares Semiconductor ETF' },
     '반도체etf': { ticker: 'SOXX', name: 'iShares Semiconductor ETF' },
+    'soxl':   { ticker: 'SOXL', name: 'Direxion Daily Semiconductor Bull 3x Shares' },
+    '속슬':    { ticker: 'SOXL', name: 'Direxion Daily Semiconductor Bull 3x Shares' },
     'smh':    { ticker: 'SMH',  name: 'VanEck Semiconductor ETF' },
     'voo':    { ticker: 'VOO',  name: 'Vanguard S&P 500 ETF' },
     'tqqq':   { ticker: 'TQQQ', name: 'ProShares UltraPro QQQ (3x)' },
@@ -896,8 +915,6 @@ function resolveStock(text) {
         for (const info of Object.values(ETF_MAP)) {
             if (info.ticker === upper) return _log('EXACT_TICKER_ETF', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
         }
-        // Unknown but valid ticker format
-        return _log('EXACT_TICKER_UNKNOWN', { ticker: upper, name: upper, market: 'US', corpCode: null });
     }
 
     // 1b) KR map exact
