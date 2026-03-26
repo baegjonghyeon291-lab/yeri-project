@@ -63,7 +63,15 @@ function getSystemPrompt(tone = 'normal') {
 6. 행동 제안은 반드시 구체적 수치 포함:
    ✅ "현재 RSI 36.8, 지지선 $7.4 부근이라 반등 확인 전까지 관망이 안전합니다."
    ✅ "EMA20($xx.xx) 아래에 있어 추세 반전 확인 전 신규 진입은 보수적으로 접근하세요."
-7. 답변 맨 끝에 [📡 데이터 출처] 블록이 제공되면 그대로 포함하세요.`;
+7. 답변 맨 끝에 [📡 데이터 출처] 블록이 제공되면 그대로 포함하세요.
+
+━━ ★★★ 종목 혼동 절대 금지 (치명적 규칙) ★★★
+1. 프롬프트에 명시된 종목(ticker)의 데이터만 사용하세요.
+2. 다른 종목(NVDA, MSFT, AAPL 등)의 데이터를 절대 가져다 쓰지 마세요.
+3. 해당 종목의 데이터가 없으면 "데이터 없음"으로 명시하세요.
+4. 절대로 유명 종목의 가격/재무를 대체 사용하지 마세요.
+5. 프롬프트에 BBAI가 지정되어 있으면 BBAI만 분석하세요. NVDA 분석 금지.
+6. 예시 비교("NVDA처럼", "MSFT와 비슷하게")도 실데이터가 아닌 이상 금지.`;
 
     if (tone === 'cute') {
         return `당신은 "예리"라는 이름의 친근한 AI 투자 비서입니다.
@@ -510,7 +518,8 @@ async function analyzeStock(data, useDeep = false, tone = 'normal') {
     const prompt = `
 다음 데이터를 바탕으로 아래 섹션을 반드시 모두 작성하세요.
 수치에는 구체적인 가격을 포함하고, 근거 없는 표현은 사용하지 마세요.
-
+★★★ 반드시 ${data.companyName || data.ticker} (${data.ticker})만 분석하세요. 다른 종목(NVDA, MSFT, AAPL 등)으로 대체 분석 절대 금지. ★★★
+${data._dataWarning ? `\n${data._dataWarning}\n` : ''}
 [분석 기준일: ${today}]
 [분석 대상: ${data.companyName || data.ticker} (${data.ticker})]
 ${horizonNote}
@@ -840,6 +849,8 @@ async function analyzeStockCasual(data, useDeep = false, tone = 'normal') {
 
     const prompt = `
 아래는 ${data.companyName || data.ticker} (${data.ticker}) 실데이터입니다. 이 데이터만 사용하세요.
+★★★ 반드시 ${data.companyName || data.ticker} (${data.ticker})만 분석하세요. 다른 종목(NVDA, MSFT, AAPL 등)으로 대체 분석 절대 금지. ★★★
+${data._dataWarning ? `\n${data._dataWarning}\n` : ''}
 
 [기준일: ${today}] ${horizonNote}
 ${score.summary}

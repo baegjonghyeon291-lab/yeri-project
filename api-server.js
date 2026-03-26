@@ -45,7 +45,7 @@ const {
     analyzeETF, analyzePortfolio, analyzeRecommendation,
     analyzeMarket, analyzeSector, classifyQuery, fallbackChat
 } = require('./services/analyzer');
-const { fetchAllStockData, fetchMarketData, fetchSectorData } = require('./services/data-fetcher');
+const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability } = require('./services/data-fetcher');
 const {
     resolveStock, resolveSector, isDeepAnalysisRequest,
     hasStockKeyword, hasEarningsKeyword, isETF, isLeveragedETF,
@@ -141,37 +141,37 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
-        // 종목 비교 분석
-        const comparisonResult = resolveComparisonStocks(text);
-        if (comparisonResult || intent.intent === 'compare_stocks') {
-            const stocks = comparisonResult || resolveComparisonStocks(text);
-            if (stocks) {
-                let tickerA = stocks.stockA.ticker;
-                let nameA = stocks.stockA.name;
-                let tickerB = stocks.stockB.ticker;
-                let nameB = stocks.stockB.name;
+        // 종목 비교 분석 — 비교 키워드가 있을 때만 비교 분기 진입
+        const COMPARISON_KEYWORDS = ['vs', 'VS', 'versus', '비교', '차이', '이랑', '랑', '대비', '어느게나아', '뭐가나아', '뭐가좋아', '둘중'];
+        const hasComparisonKeyword = COMPARISON_KEYWORDS.some(k => text.replace(/\s/g, '').includes(k));
+        const comparisonResult = hasComparisonKeyword ? resolveComparisonStocks(text) : null;
+        if (comparisonResult) {
+            const stocks = comparisonResult;
+            let tickerA = stocks.stockA.ticker;
+            let nameA = stocks.stockA.name;
+            let tickerB = stocks.stockB.ticker;
+            let nameB = stocks.stockB.name;
 
-                // 한국 종목 처리
-                if (stocks.stockA.market === 'KR') {
-                    const krA = resolveKoreanTicker(tickerA);
-                    if (krA) { tickerA = toFinnhubKRFormat(krA.ticker); nameA = krA.name; }
-                    else { tickerA = toFinnhubKRFormat(tickerA); }
-                }
-                if (stocks.stockB.market === 'KR') {
-                    const krB = resolveKoreanTicker(tickerB);
-                    if (krB) { tickerB = toFinnhubKRFormat(krB.ticker); nameB = krB.name; }
-                    else { tickerB = toFinnhubKRFormat(tickerB); }
-                }
-
-                const [dataA, dataB] = await Promise.all([
-                    fetchAllStockData(tickerA, nameA, stocks.stockA.corpCode || null),
-                    fetchAllStockData(tickerB, nameB, stocks.stockB.corpCode || null),
-                ]);
-
-                const report = await analyzeStockComparison(dataA, dataB, useDeep, 'normal');
-                messages.push({ type: 'analysis', content: report, ticker: `${tickerA} vs ${tickerB}`, name: `${nameA} vs ${nameB}` });
-                return res.json({ messages });
+            // 한국 종목 처리
+            if (stocks.stockA.market === 'KR') {
+                const krA = resolveKoreanTicker(tickerA);
+                if (krA) { tickerA = toFinnhubKRFormat(krA.ticker); nameA = krA.name; }
+                else { tickerA = toFinnhubKRFormat(tickerA); }
             }
+            if (stocks.stockB.market === 'KR') {
+                const krB = resolveKoreanTicker(tickerB);
+                if (krB) { tickerB = toFinnhubKRFormat(krB.ticker); nameB = krB.name; }
+                else { tickerB = toFinnhubKRFormat(tickerB); }
+            }
+
+            const [dataA, dataB] = await Promise.all([
+                fetchAllStockData(tickerA, nameA, stocks.stockA.corpCode || null),
+                fetchAllStockData(tickerB, nameB, stocks.stockB.corpCode || null),
+            ]);
+
+            const report = await analyzeStockComparison(dataA, dataB, useDeep, 'normal');
+            messages.push({ type: 'analysis', content: report, ticker: `${tickerA} vs ${tickerB}`, name: `${nameA} vs ${nameB}` });
+            return res.json({ messages });
         }
 
         // 종목 분석
@@ -181,6 +181,8 @@ app.post('/api/chat', async (req, res) => {
             let name = stockResult.name;
             let market = stockResult.market;
             let corpCode = stockResult.corpCode || null;
+
+            console.log(`[API /chat] ▶ resolve 결과: input="${text}" → ticker=${ticker}, name=${name}, market=${market}`);
 
             if (market === 'KR') {
                 const krInfo = resolveKoreanTicker(ticker);
@@ -193,14 +195,32 @@ app.post('/api/chat', async (req, res) => {
                 }
             }
 
-            // intent 결정
+            // intent 결정 — compare_stocks는 단일 종목 분기에서 무시
             let stockIntent = 'full_analysis';
             if (hasEarningsKeyword(text)) stockIntent = 'earnings_check';
             else if (isETF(ticker)) stockIntent = 'etf_analysis';
-            else if (intent.intent && intent.intent !== 'fallback') stockIntent = intent.intent;
+            else if (intent.intent && intent.intent !== 'fallback' && intent.intent !== 'compare_stocks') stockIntent = intent.intent;
 
             const data = await fetchAllStockData(ticker, name, corpCode);
             data.investmentContext = session.context;
+
+            // ★ 데이터 신뢰도 검증 — 가격조차 없으면 분석 불가 응답
+            const reliability = computeDataReliability(data);
+            if (reliability.tier === 'NO_DATA') {
+                console.warn(`[API /chat] ❌ ${ticker} 데이터 부족 (${reliability.pct}%) — 분석 거부`);
+                const noDataMsg = `"${name || ticker}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n` +
+                    `가능한 원인:\n` +
+                    `• 거래 시간 외이거나 데이터 제공사에서 해당 종목을 지원하지 않을 수 있어요\n` +
+                    `• 소형주/신규 상장 종목은 데이터가 제한적일 수 있어요\n\n` +
+                    `정확한 분석을 위해 잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!`;
+                messages.push({ type: 'text', content: noDataMsg });
+                return res.json({ messages });
+            }
+
+            // PARTIAL 데이터일 때도 경고를 data에 포함
+            if (reliability.tier === 'PARTIAL') {
+                data._dataWarning = `⚠️ 일부 데이터 미확보 (신뢰도 ${reliability.pct}%). 누락: ${reliability.missing.join(', ')}`;
+            }
 
             let report;
             switch (stockIntent) {
@@ -263,11 +283,23 @@ app.post('/api/chat', async (req, res) => {
                 const data = await fetchAllStockData(ticker, name, null);
                 data.investmentContext = session.context;
 
-                const intent = await classifyQuery(text);
+                // ★ 데이터 신뢰도 검증
+                const reliability = computeDataReliability(data);
+                if (reliability.tier === 'NO_DATA') {
+                    console.warn(`[API /chat] ❌ 자동검색 ${ticker} 데이터 부족 — 분석 거부`);
+                    const noDataMsg = `"${name}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!`;
+                    messages.push({ type: 'text', content: noDataMsg });
+                    return res.json({ messages });
+                }
+                if (reliability.tier === 'PARTIAL') {
+                    data._dataWarning = `⚠️ 일부 데이터 미확보 (신뢰도 ${reliability.pct}%). 누락: ${reliability.missing.join(', ')}`;
+                }
+
+                const searchIntent = await classifyQuery(text);
                 let stockIntent = 'full_analysis';
                 if (hasEarningsKeyword(text)) stockIntent = 'earnings_check';
                 else if (isETF(ticker)) stockIntent = 'etf_analysis';
-                else if (intent.intent && intent.intent !== 'fallback') stockIntent = intent.intent;
+                else if (searchIntent.intent && searchIntent.intent !== 'fallback' && searchIntent.intent !== 'compare_stocks') stockIntent = searchIntent.intent;
 
                 let report;
                 switch (stockIntent) {

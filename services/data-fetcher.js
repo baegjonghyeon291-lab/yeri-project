@@ -628,7 +628,7 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
     const isKR = ticker.endsWith('.KS');
     console.log(`\n[DataFetcher] Starting full pipeline for: ${ticker}`);
 
-    const [price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures] = await Promise.all([
+    let [price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures] = await Promise.all([
         getPriceData(ticker),
         getPriceHistory(ticker),
         getTechnicalIndicators(ticker),
@@ -640,6 +640,29 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         !isKR ? getSECFilings(ticker) : Promise.resolve(null),
         corpCode ? getKoreanDisclosures(corpCode) : Promise.resolve(null)
     ]);
+
+    // ★ Yahoo 보강 — 핵심 데이터(가격/기술지표/재무)가 없으면 Yahoo로 재시도
+    if (!price) {
+        console.log(`[DataFetcher] ⚡ ${ticker} 가격 누락 → Yahoo 직접 재시도`);
+        price = await safeGet('Price/Yahoo-retry', () => yahoo.getYahooPrice(ticker));
+    }
+    if (!technical) {
+        console.log(`[DataFetcher] ⚡ ${ticker} 기술지표 누락 → Yahoo 직접 재시도`);
+        technical = await safeGet('Tech/Yahoo-retry', () => yahoo.getYahooTechnicals(ticker));
+    }
+    if (!history) {
+        console.log(`[DataFetcher] ⚡ ${ticker} 이력 누락 → Yahoo 직접 재시도`);
+        history = await safeGet('History/Yahoo-retry', () => yahoo.getYahooHistory(ticker));
+    }
+    if (!fundamentals) {
+        console.log(`[DataFetcher] ⚡ ${ticker} 재무 누락 → Yahoo 직접 재시도`);
+        fundamentals = await safeGet('Fund/Yahoo-retry', () => yahoo.getYahooFundamentals(ticker));
+    }
+
+    // companyName 보강 — fundamentals에서 가져온 이름 사용
+    if ((!companyName || companyName === ticker) && fundamentals?.companyName) {
+        companyName = fundamentals.companyName;
+    }
 
     // Compute simple support/resistance from candle data
     let supportResist = null;

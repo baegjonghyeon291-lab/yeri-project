@@ -728,22 +728,27 @@ function resolveStock(text) {
     const cleaned = extractCompanyName(text);
     const lower = cleaned.toLowerCase().replace(/\s/g, '');
 
+    const _log = (stage, result) => {
+        console.log(`[resolveStock] input="${text}" → cleaned="${cleaned}" → lower="${lower}" | stage=${stage} → ticker=${result?.ticker}, name=${result?.name}, market=${result?.market}`);
+        return result;
+    };
+
     // 1) KR map exact
     if (KR_COMPANY_MAP[lower]) {
         const info = KR_COMPANY_MAP[lower];
-        return { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode };
+        return _log('KR_EXACT', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
     }
 
     // 2) US map exact
     if (US_COMPANY_MAP[lower]) {
         const info = US_COMPANY_MAP[lower];
-        return { ticker: info.ticker, name: info.name, market: 'US', corpCode: null };
+        return _log('US_EXACT', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
     }
 
     // 2.5) ETF map exact
     if (ETF_MAP[lower]) {
         const info = ETF_MAP[lower];
-        return { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true };
+        return _log('ETF_EXACT', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
     }
 
     // 3) Direct US ticker input (e.g. "NVDA", "TSLA", "AAPL")
@@ -751,38 +756,39 @@ function resolveStock(text) {
     if (/^[A-Z]{1,5}(\.[A-Z])?$/.test(upper)) {
         // Check if it's a known ticker in US map
         for (const info of Object.values(US_COMPANY_MAP)) {
-            if (info.ticker === upper) return { ticker: info.ticker, name: info.name, market: 'US', corpCode: null };
+            if (info.ticker === upper) return _log('US_TICKER_KNOWN', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
         }
         // Check ETF map
         for (const info of Object.values(ETF_MAP)) {
-            if (info.ticker === upper) return { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true };
+            if (info.ticker === upper) return _log('ETF_TICKER_KNOWN', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
         }
         // Unknown but valid ticker format — assume US
-        return { ticker: upper, name: upper, market: 'US', corpCode: null };
+        return _log('US_TICKER_UNKNOWN', { ticker: upper, name: upper, market: 'US', corpCode: null });
     }
 
     // 4) KR 6-digit code
     if (/^\d{6}$/.test(cleaned)) {
         for (const info of Object.values(KR_COMPANY_MAP)) {
-            if (info.ticker === cleaned) return { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode };
+            if (info.ticker === cleaned) return _log('KR_CODE_KNOWN', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
         }
-        return { ticker: cleaned, name: cleaned, market: 'KR', corpCode: null };
+        return _log('KR_CODE_UNKNOWN', { ticker: cleaned, name: cleaned, market: 'KR', corpCode: null });
     }
 
     // 5) Partial match in US map (for compound text like "엔비디아칩")
     for (const [key, info] of Object.entries(US_COMPANY_MAP)) {
         if (key.length >= 2 && lower.includes(key)) {
-            return { ticker: info.ticker, name: info.name, market: 'US', corpCode: null };
+            return _log('US_PARTIAL', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
         }
     }
 
     // 6) Partial match in KR map
     for (const [key, info] of Object.entries(KR_COMPANY_MAP)) {
         if (key.length >= 2 && lower.includes(key)) {
-            return { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode };
+            return _log('KR_PARTIAL', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
         }
     }
 
+    console.log(`[resolveStock] ❌ resolve 실패: input="${text}" → cleaned="${cleaned}" → lower="${lower}"`);
     return null;
 }
 
