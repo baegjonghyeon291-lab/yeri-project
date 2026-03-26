@@ -24,7 +24,7 @@ if (MISSING_ENV.length) {
 }
 
 // Optional env 경고 (기능 제한)
-const OPTIONAL_ENV = ['TELEGRAM_BOT_TOKEN', 'FINNHUB_API_KEY', 'TWELVEDATA_API_KEY',
+const OPTIONAL_ENV = ['FINNHUB_API_KEY', 'TWELVEDATA_API_KEY',
     'ALPHAVANTAGE_API_KEY', 'FMP_API_KEY', 'NEWS_API_KEY'];
 const missingOpt = OPTIONAL_ENV.filter(k => !process.env[k]);
 if (missingOpt.length) {
@@ -51,13 +51,17 @@ const {
     hasStockKeyword, hasEarningsKeyword, isETF, isLeveragedETF,
     getETFPeers, parsePortfolio, isPortfolioInput,
     isRecommendationKeyword, toFinnhubKRFormat, resolveKoreanTicker,
+    findClosestAlias, extractCompanyName, suggestCandidates,
+    resolveComparisonStocks,
     SECTOR_MAP
 } = require('./utils/ticker-util');
-const { generateWatchlistBriefing } = require('./services/briefing_service');
+const { generateWatchlistBriefing, generateMarketBriefing } = require('./services/briefing_service');
+const { searchTicker } = require('./services/ticker-search');
 const { buildPerformanceReport } = require('./services/recommendation-tracker');
 const sessions = require('./services/session');
 const watchlistStore = require('./services/watchlist-store');
 const userSettings = require('./services/user-settings');
+const { scanWatchlist, invalidateCache } = require('./services/alert-engine');
 
 const app = express();
 app.use(cors());
@@ -77,11 +81,11 @@ app.get('/', (req, res) => {
             'GET  /health',
             'GET  /api/health',
             'POST /api/chat',
-            'GET  /api/watchlist/:chatId',
-            'POST /api/watchlist/:chatId/add',
-            'POST /api/watchlist/:chatId/remove',
-            'POST /api/watchlist/:chatId/style',
-            'GET  /api/briefing/:chatId',
+            'GET  /api/watchlist/:userId',
+            'POST /api/watchlist/:userId/add',
+            'POST /api/watchlist/:userId/remove',
+            'POST /api/watchlist/:userId/style',
+            'GET  /api/briefing/:userId',
             'POST /api/portfolio/analyze',
             'GET  /api/market',
         ],
@@ -135,6 +139,39 @@ app.post('/api/chat', async (req, res) => {
             const report = await analyzeSector(sectorData, useDeep, 'normal');
             messages.push({ type: 'analysis', content: report });
             return res.json({ messages });
+        }
+
+        // 종목 비교 분석
+        const comparisonResult = resolveComparisonStocks(text);
+        if (comparisonResult || intent.intent === 'compare_stocks') {
+            const stocks = comparisonResult || resolveComparisonStocks(text);
+            if (stocks) {
+                let tickerA = stocks.stockA.ticker;
+                let nameA = stocks.stockA.name;
+                let tickerB = stocks.stockB.ticker;
+                let nameB = stocks.stockB.name;
+
+                // 한국 종목 처리
+                if (stocks.stockA.market === 'KR') {
+                    const krA = resolveKoreanTicker(tickerA);
+                    if (krA) { tickerA = toFinnhubKRFormat(krA.ticker); nameA = krA.name; }
+                    else { tickerA = toFinnhubKRFormat(tickerA); }
+                }
+                if (stocks.stockB.market === 'KR') {
+                    const krB = resolveKoreanTicker(tickerB);
+                    if (krB) { tickerB = toFinnhubKRFormat(krB.ticker); nameB = krB.name; }
+                    else { tickerB = toFinnhubKRFormat(tickerB); }
+                }
+
+                const [dataA, dataB] = await Promise.all([
+                    fetchAllStockData(tickerA, nameA, stocks.stockA.corpCode || null),
+                    fetchAllStockData(tickerB, nameB, stocks.stockB.corpCode || null),
+                ]);
+
+                const report = await analyzeStockComparison(dataA, dataB, useDeep, 'normal');
+                messages.push({ type: 'analysis', content: report, ticker: `${tickerA} vs ${tickerB}`, name: `${nameA} vs ${nameB}` });
+                return res.json({ messages });
+            }
         }
 
         // 종목 분석
@@ -202,6 +239,75 @@ app.post('/api/chat', async (req, res) => {
             }
         }
 
+        // 종목 키워드는 있는데 resolveStock이 실패한 경우 —
+        // 1) 유사 종목 제안 (findClosestAlias 하드코딩 기반)
+        // 2) ticker-search API 기반 자동 검색
+        if (hasStockKeyword(text)) {
+            const extracted = extractCompanyName(text) || text;
+
+            // 자동 검색 API 호출
+            let searchResult;
+            try {
+                searchResult = await searchTicker(extracted);
+            } catch (err) {
+                console.warn('[API /chat] ticker-search 실패:', err.message);
+                searchResult = { found: false, auto: false, ticket: null, candidates: [] };
+            }
+
+            if (searchResult.found && searchResult.auto) {
+                // 신뢰도 높음 — 자동 종목 분석
+                console.log(`[API /chat] 자동 검색: "${extracted}" → ${searchResult.ticker}`);
+                const ticker = searchResult.ticker;
+                const name   = searchResult.name || ticker;
+
+                const data = await fetchAllStockData(ticker, name, null);
+                data.investmentContext = session.context;
+
+                const intent = await classifyQuery(text);
+                let stockIntent = 'full_analysis';
+                if (hasEarningsKeyword(text)) stockIntent = 'earnings_check';
+                else if (isETF(ticker)) stockIntent = 'etf_analysis';
+                else if (intent.intent && intent.intent !== 'fallback') stockIntent = intent.intent;
+
+                let report;
+                switch (stockIntent) {
+                    case 'buy_timing':      report = await analyzeStockBuyTiming(data, useDeep, 'normal'); break;
+                    case 'sell_timing':     report = await analyzeStockSellTiming(data, useDeep, 'normal'); break;
+                    case 'risk_check':      report = await analyzeStockRisk(data, useDeep, 'normal'); break;
+                    case 'earnings_check':  report = await analyzeStockEarnings(data, useDeep, 'normal'); break;
+                    case 'etf_analysis':    report = await analyzeETF(data, useDeep, 'normal', { isLeveraged: isLeveragedETF(ticker), peers: getETFPeers(ticker) || [] }); break;
+                    default:                report = await (useDeep ? analyzeStock(data, useDeep, 'normal') : analyzeStockCasual(data, useDeep, 'normal'));
+                }
+
+                sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastTickerTime: Date.now() });
+                messages.push({ type: 'analysis', content: report, ticker, name });
+                return res.json({ messages });
+            }
+
+            if (searchResult.found && !searchResult.auto && searchResult.candidates.length > 0) {
+                // 신뢰도 불확실 — 후보 제시
+                const candidateLines = searchResult.candidates
+                    .map(c => `• **${c.ticker}** — ${c.name}`)
+                    .join('\n');
+                const msg = `"${extracted}"\uc5d0 해당하는 종목을 여러 개 찾았어요.\n\n다음 중 어떤 종목인가요?\n\n${candidateLines}\n\n정확한 티커를 입력해 주세요! (예: ${searchResult.candidates[0].ticker} 분석해줘)`;
+                messages.push({ type: 'text', content: msg });
+                return res.json({ messages });
+            }
+
+            // findClosestAlias 하드코딩 fallback
+            const candidate = findClosestAlias(extracted);
+            if (candidate) {
+                const suggestionMsg = `"${extracted}"에 해당하는 종목을 정확히 찾지 못했어요.\n\n혹시 **${candidate.name} (${candidate.ticker})**을 말씀하시는 건가요?\n맞다면 "${candidate.ticker} 분석해줘"라고 다시 입력해 주세요!`;
+                messages.push({ type: 'text', content: suggestionMsg });
+                return res.json({ messages });
+            }
+
+            // 백포: 모두 실패
+            const noMatchMsg = `"${extracted}"에 해당하는 종목을 찾지 못했어요.\n\n정확한 티커(예: NVDA, TSLA, 005930)나 종목명(예: 엔비디아, 테슬라, 삼성전자)으로 다시 입력해 주세요!`;
+            messages.push({ type: 'text', content: noMatchMsg });
+            return res.json({ messages });
+        }
+
         // Fallback
         const reply = await fallbackChat(text, 'normal');
         messages.push({ type: 'text', content: reply });
@@ -214,36 +320,46 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // ── 관심종목 ──────────────────────────────────────────────────────
-app.get('/api/watchlist/:chatId', (req, res) => {
-    const list = watchlistStore.get(req.params.chatId);
-    const style = watchlistStore.getStyle(req.params.chatId);
+app.get('/api/watchlist/:userId', (req, res) => {
+    const list = watchlistStore.get(req.params.userId);
+    const style = watchlistStore.getStyle(req.params.userId);
     res.json({ list, style });
 });
 
-app.post('/api/watchlist/:chatId/add', (req, res) => {
+app.post('/api/watchlist/:userId/add', (req, res) => {
     const { ticker } = req.body;
     if (!ticker) return res.status(400).json({ error: 'ticker required' });
-    const result = watchlistStore.add(req.params.chatId, ticker.toUpperCase());
-    res.json({ result, list: watchlistStore.get(req.params.chatId) });
+    const result = watchlistStore.add(req.params.userId, ticker.toUpperCase());
+    res.json({ result, list: watchlistStore.get(req.params.userId) });
 });
 
-app.post('/api/watchlist/:chatId/remove', (req, res) => {
+app.post('/api/watchlist/:userId/remove', (req, res) => {
     const { ticker } = req.body;
     if (!ticker) return res.status(400).json({ error: 'ticker required' });
-    const result = watchlistStore.remove(req.params.chatId, ticker.toUpperCase());
-    res.json({ result, list: watchlistStore.get(req.params.chatId) });
+    const result = watchlistStore.remove(req.params.userId, ticker.toUpperCase());
+    res.json({ result, list: watchlistStore.get(req.params.userId) });
 });
 
-app.post('/api/watchlist/:chatId/style', (req, res) => {
+app.post('/api/watchlist/:userId/style', (req, res) => {
     const { style } = req.body;
-    watchlistStore.setStyle(req.params.chatId, style);
+    watchlistStore.setStyle(req.params.userId, style);
     res.json({ ok: true });
 });
 
-// ── 브리핑 ────────────────────────────────────────────────────────
-app.get('/api/briefing/:chatId', async (req, res) => {
+// ── 시장 브리핑 (단독) ────────────────────────────────────────────
+app.get('/api/briefing/market', async (req, res) => {
     try {
-        const list = watchlistStore.get(req.params.chatId);
+        const report = await generateMarketBriefing();
+        res.json({ report });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── 브리핑 ────────────────────────────────────────────────────────
+app.get('/api/briefing/:userId', async (req, res) => {
+    try {
+        const list = watchlistStore.get(req.params.userId);
         if (!list.length) return res.json({ report: '', list: [] });
         const report = await generateWatchlistBriefing(list);
         res.json({ report, list });
@@ -282,6 +398,82 @@ app.get('/api/market', async (req, res) => {
         res.json({ report });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// ── 웹앱 알림 엔진 ───────────────────────────────────────────────
+// GET /api/alerts/:userId          — 관심종목 알림/상태 조회 (5분 캐시)
+// GET /api/alerts/:userId?refresh=true — 캐시 무시하고 즉시 재스캔
+app.get('/api/alerts/:userId', async (req, res) => {
+    const { chatId } = req.params;
+    const forceRefresh = req.query.refresh === 'true';
+    try {
+        if (forceRefresh) invalidateCache(chatId);
+        const result = await scanWatchlist(chatId);
+        res.json({
+            ok: true,
+            chatId,
+            alertCount: result.alertCount || 0,
+            alerts: result.alerts || [],
+            stocks: result.stocks || [],
+            updatedAt: result.updatedAt,
+        });
+    } catch (err) {
+        console.error('[/api/alerts]', err.message);
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
+
+// GET /api/alerts/:userId/summary — 알림 배지 숫자만 빠르게 반환
+app.get('/api/alerts/:userId/summary', async (req, res) => {
+    const { chatId } = req.params;
+    try {
+        const result = await scanWatchlist(chatId);
+        res.json({
+            ok: true,
+            alertCount: result.alertCount || 0,
+            highCount: (result.alerts || []).filter(a => a.level === 'high').length,
+            updatedAt: result.updatedAt,
+        });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
+
+
+// ── 유사 종목 추천 엔드포인트 ───────────────────────────────────────
+// GET /api/suggest?q=엔비디어  → 후보 3~5개 + confidence 반환
+app.get('/api/suggest', (req, res) => {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json({ ok: false, error: 'q 파라미터 필요' });
+    try {
+        const result = suggestCandidates(q);
+        res.json({ ok: true, ...result });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
+
+// ── 종목 멀티 가격 조회 (포트폴리오용) ─────────────────────────────
+// GET /api/stocks/min-data?tickers=AAPL,TSLA
+app.get('/api/stocks/min-data', async (req, res) => {
+    const tickersRaw = req.query.tickers || '';
+    const tickers = tickersRaw.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+    if (!tickers.length) return res.json({ ok: true, data: {} });
+
+    try {
+        const results = await Promise.all(tickers.map(async (t) => {
+            const priceData = await fetchAllStockData(t).catch(() => null);
+            if (!priceData || !priceData.price) return [t, null];
+            return [t, {
+                price: priceData.price.current,
+                changePct: priceData.price.changePct,
+                currency: t.endsWith('.KS') || t.endsWith('.KQ') ? '₩' : '$'
+            }];
+        }));
+        res.json({ ok: true, data: Object.fromEntries(results) });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
     }
 });
 

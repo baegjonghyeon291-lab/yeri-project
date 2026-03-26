@@ -1,100 +1,174 @@
 /**
  * briefing_service.js
- * 관심종목 데일리 브리핑 — 행동 중심, 자연스러운 "귀염둥이 예리야" 말투
+ * 관심종목 데일리 브리핑 — 실데이터(가격/기술지표/뉴스) 기반
+ * 포맷: 결론 → 가격/기술 → 뉴스 → 리스크 → 행동 제안
  */
-const { fetchAllStockData } = require('./data-fetcher');
+const { fetchAllStockData, fetchMarketData } = require('./data-fetcher');
 const client = require('./openai-client');
 const MODEL_DEFAULT = process.env.OPENAI_MODEL_DEFAULT || 'gpt-4.1';
 
-/**
- * /brief 명령어용 — 즉시 브리핑 (기존 호환 유지)
- */
+// ─────────────────────────────────────────────
+// 실데이터 필드 안전 추출 헬퍼
+// ─────────────────────────────────────────────
+function safeNum(val, digits = 2) {
+    const n = parseFloat(val);
+    return isNaN(n) ? null : n.toFixed(digits);
+}
+
+function extractStockSummary(data) {
+    const ticker = data.ticker;
+    const name   = data.companyName || ticker;
+    const currency = ticker.endsWith('.KS') ? '₩' : '$';
+
+    // 가격 — data.price 필드명 정확히 매핑
+    const price      = data.price?.current     ? `${currency}${Number(data.price.current).toLocaleString()}` : '데이터 부족';
+    const changePct  = data.price?.changePct   != null ? `${Number(data.price.changePct) >= 0 ? '+' : ''}${safeNum(data.price.changePct)}%` : '데이터 부족';
+    const hi52w      = data.price?.fifty2High  ? `${currency}${Number(data.price.fifty2High).toLocaleString()}` : '데이터 부족';
+    const lo52w      = data.price?.fifty2Low   ? `${currency}${Number(data.price.fifty2Low).toLocaleString()}` : '데이터 부족';
+    const volume     = data.price?.volume      ? Number(data.price.volume).toLocaleString() : '데이터 부족';
+
+    // 기술지표 — data.technical (TwelveData 기준)
+    const rsi    = data.technical?.rsi    != null ? safeNum(data.technical.rsi, 1) : '데이터 부족';
+    const rsiSig = data.technical?.rsiSignal || '';
+    const ema20  = data.technical?.ema20  != null ? `${currency}${safeNum(data.technical.ema20)}` : '데이터 부족';
+    const ema50  = data.technical?.ema50  != null ? `${currency}${safeNum(data.technical.ema50)}` : '데이터 부족';
+    const macdTrend  = data.technical?.macd?.trend || '데이터 부족';
+    const macdHist   = data.technical?.macd?.hist  != null ? safeNum(data.technical.macd.hist, 4) : null;
+
+    // 지지/저항
+    const support    = data.supportResist?.support    ? `${currency}${data.supportResist.support}` : '데이터 부족';
+    const resistance = data.supportResist?.resistance ? `${currency}${data.supportResist.resistance}` : '데이터 부족';
+
+    // 뉴스 (최신 3개 제목)
+    const newsItems = (data.news || []).slice(0, 3);
+    const newsBlock = newsItems.length > 0
+        ? newsItems.map(n => `  • [${n.publishedAt || '날짜 없음'}] ${n.title} (${n.source || '출처 없음'})`).join('\n')
+        : '  최신 뉴스 부족';
+
+    return {
+        ticker, name, currency,
+        price, changePct, hi52w, lo52w, volume,
+        rsi, rsiSig, ema20, ema50, macdTrend, macdHist,
+        support, resistance,
+        newsBlock,
+        hasData: data.price?.current != null,
+        hasNews: newsItems.length > 0,
+    };
+}
+
+// ─────────────────────────────────────────────
+// 종목 데이터 블록 문자열 생성
+// ─────────────────────────────────────────────
+function buildStockBlock(s) {
+    return `
+[${s.name} (${s.ticker})]
+현재가: ${s.price} | 전일비: ${s.changePct} | 거래량: ${s.volume}
+52주 고점: ${s.hi52w} | 52주 저점: ${s.lo52w}
+RSI(14): ${s.rsi} ${s.rsiSig ? `→ ${s.rsiSig}` : ''}
+EMA20: ${s.ema20} | EMA50: ${s.ema50}
+MACD 추세: ${s.macdTrend}${s.macdHist ? ` (Hist: ${s.macdHist})` : ''}
+지지선: ${s.support} | 저항선: ${s.resistance}
+최근 뉴스:
+${s.newsBlock}`.trim();
+}
+
+// ─────────────────────────────────────────────
+// 관심종목 브리핑 생성
+// ─────────────────────────────────────────────
 async function generateWatchlistBriefing(tickers) {
     return generateDailyBriefingText(tickers, true);
 }
 
-/**
- * 핵심 브리핑 생성 함수
- * @param {string[]} tickers   관심종목 티커 목록
- * @param {boolean} isManual   true: /brief 명령, false: 자동 스케줄
- */
 async function generateDailyBriefingText(tickers, isManual = false) {
     if (!tickers || tickers.length === 0) {
-        return `귀염둥이 예리야 아직 등록된 관심종목이 없어\n원하면 내가 같이 종목 골라줄게 😊\n(/add NVDA 로 추가 가능)`;
+        return `관심종목이 아직 없어요.\n아래 입력창에서 티커를 추가해보세요! (예: NVDA, 005930)`;
     }
 
     console.log(`[BriefingService] 브리핑 생성 중: ${tickers.join(', ')}`);
 
-    // 각 종목 데이터 병렬 수집
-    const results = await Promise.all(tickers.map(async (ticker) => {
+    // 병렬 데이터 수집
+    const rawResults = await Promise.all(tickers.map(async (ticker) => {
         try {
             const data = await fetchAllStockData(ticker);
-            return {
-                ticker,
-                name:     data.companyName || ticker,
-                price:    data.price?.current   ?? 'N/A',
-                change1d: data.price?.changePercent ?? data.price?.changePct ?? 'N/A',
-                change1m: data.price?.change1m  ?? 'N/A',
-                rsi:      data.technicals?.rsi14 ?? data.technical?.rsi ?? 'N/A',
-                ema20:    data.technicals?.ema20 ?? 'N/A',
-                trend:    data.technicals?.macdSignal ?? data.technical?.macd?.trend ?? 'N/A',
-            };
+            return extractStockSummary(data);
         } catch (err) {
-            console.error(`[BriefingService] ${ticker} 데이터 수집 실패:`, err.message);
-            return { ticker, error: true };
+            console.error(`[BriefingService] ${ticker} 실패:`, err.message);
+            return { ticker, name: ticker, hasData: false, newsBlock: '  최신 뉴스 부족' };
         }
     }));
 
-    const valid = results.filter(r => !r.error);
-    if (!valid.length) return `귀염둥이 예리야 오늘 데이터 수집에 문제가 있어. 잠시 후 다시 시도해줘.`;
+    if (!rawResults.some(r => r.hasData)) {
+        return `데이터 수집에 문제가 있어요. 잠시 후 다시 시도해주세요.`;
+    }
 
-    const dataBlock = valid.map(s =>
-        `- ${s.name}(${s.ticker}): $${s.price} (전일 ${s.change1d}%, 1달 ${s.change1m}%) | RSI ${s.rsi} | EMA20 ${s.ema20} | 추세 ${s.trend}`
-    ).join('\n');
-
+    const dataBlock = rawResults.map(s => buildStockBlock(s)).join('\n\n---\n\n');
+    const hasNewsCount = rawResults.filter(s => s.hasNews).length;
     const intro = isManual ? '관심종목 브리핑' : '오늘 아침 관심종목 브리핑';
+    const today = new Date().toLocaleDateString('ko-KR');
 
-    const prompt = `다음은 사용자 관심종목의 오늘 상태야.
+    const prompt = `다음은 ${today} 기준 관심종목 실데이터야.
 
 [${intro}]
 ${dataBlock}
 
-아래 형식과 규칙에 맞게 브리핑을 작성해줘.
+위 실데이터를 기반으로 종목별 브리핑을 아래 형식에 맞게 작성해줘.
+차분한 투자 비서 톤으로, 근거 중심으로 써줘.
 
-[형식]
-반드시 "귀염둥이 예리야 오늘 관심종목 브리핑이야" 로 시작
+━━━━━━━━━━━━━━━━━━━━━━
+[각 종목당 반드시 이 5개 섹션 순서대로]
 
-각 종목은 번호 순서로, 종목당 2~4줄:
-1. [종목명/티커]
-- 오늘 상태 핵심 한 줄
-- 👉 할 행동 (아래 표현 중 하나 사용)
+📊 종목 요약
+이 종목이 어떤 섹터/테마에 속하는지, 최근 전체적인 흐름(강세/약세/횡보)을 2~3줄로 설명.
+단순 나열 금지 — "왜 지금 이 상황인지" 맥락을 설명할 것.
 
-할 행동 표현 (한 개만 선택):
-- 지금은 지켜보는 게 좋아
-- 매수 준비를 해두자
-- 매도 준비를 해두는 게 좋아 보여
-- 아직은 관망이 더 좋아
-- 급하게 따라가진 말고 눌림을 보자
-- 일부 익절도 생각해볼 수 있어
-- 분할 접근을 준비해두자
+📉 기술적 분석
+- RSI: [수치] → [과매수/과매도/중립] 판단
+- EMA 20/50: [단기/중기 정렬 방향 — 상승정렬/하락정렬/횡보]
+- MACD: [양수/음수/골든크로스/데드크로스] 여부
+- 주요 지지선: [가격]
+- 주요 저항선: [가격]
+➡️ 한 문장 기술적 결론 (예: "하락 추세 속 과매도 구간 근접")
 
-마지막에 전체 한 줄 종합 코멘트 포함
+📦 수급 / 거래 흐름
+거래량 동향, 수급 유입 여부, 큰 손 매집/매도 신호 유무를 1~2줄로.
+데이터 없으면 "수급 데이터 부족" 명시.
 
-[규칙]
-- 딱딱한 분석 리포트 금지, 자연스러운 대화체
-- 종목당 2~4줄만 (너무 길면 안 됨)
-- 기술적 지표는 행동 판단에만 활용, 숫자 나열 금지
-- 과한 표현 절대 금지: 몰빵, 올인, 무조건 사야 한다, 지금 안 사면 늦는다
-- 마지막: "귀염둥이 예리의 성공적인 투자를 응원합니다♡"`;
+📰 뉴스 / 이슈
+가장 중요한 뉴스 or 이슈 1~2개 요약.
+→ 해당 뉴스가 주가에 미치는 영향 1줄 추가.
+뉴스 없으면 "최신 뉴스 부족" 명시.
+
+🧠 종합 판단 + 전략
+현재 구간 성격을 한 문장으로 정의.
+👉 보유자 전략: (구체적 조건/가격 포함)
+👉 신규 진입 전략: (진입 조건 or 가격 구간 포함)
+💡 단기 결론: [관망 / 분할매수 준비 / 일부 익절 / 매수 대기] 중 하나 선택 + 이유 한 줄
+
+━━━━━━━━━━━━━━━━━━━━━━
+[모든 종목 분석 후 마지막에]
+📋 오늘 전체 요약
+- 주목 종목: (가장 변화가 있는 종목 1~2개)
+- 전체 분위기: (한 줄)
+"예리가 응원해요, 오늘도 현명한 투자 하세요 ♡"
+
+[절대 금지]
+- 데이터에 없는 수치를 만들어내는 것
+- 뉴스 없으면 반드시 "최신 뉴스 부족" 명시
+- 수치 없는 섹션은 반드시 "데이터 부족" 명시
+- "몰빵", "올인", "무조건 오른다" 등 과장 표현
+- 뉴스 데이터 확보 현황: ${hasNewsCount}개 종목 뉴스 있음`;
 
     try {
         const response = await client.chat.completions.create({
             model: MODEL_DEFAULT,
             messages: [
-                { role: 'system', content: '너는 "예리"라는 친근한 AI 투자 비서야. 자연스럽고 행동 중심으로 브리핑해.' },
+                {
+                    role: 'system',
+                    content: '너는 "예리"라는 AI 투자 비서야. 차분하고 근거 기반의 투자 브리핑을 해. 각 종목마다 5개 섹션(종목요약/기술분석/수급흐름/뉴스이슈/종합판단+전략)을 반드시 포함해. 데이터가 없으면 절대 수치를 만들어내지 마.'
+                },
                 { role: 'user', content: prompt }
             ],
-            max_tokens: 1200,
+            max_tokens: 3000,
         });
         return response.choices[0].message.content;
     } catch (err) {
@@ -103,4 +177,85 @@ ${dataBlock}
     }
 }
 
-module.exports = { generateWatchlistBriefing, generateDailyBriefingText };
+// ─────────────────────────────────────────────
+// 시장 전체 브리핑 생성
+// ─────────────────────────────────────────────
+async function generateMarketBriefing() {
+    console.log(`[BriefingService] 시장 브리핑 생성 중...`);
+    const today = new Date().toLocaleDateString('ko-KR');
+
+    let marketData;
+    try {
+        marketData = await fetchMarketData();
+    } catch (err) {
+        console.error('[BriefingService] 시장 데이터 수집 실패:', err.message);
+        return '시장 데이터 수집에 실패했어요. 잠시 후 다시 시도해주세요.';
+    }
+
+    const { indices, macro, news } = marketData;
+
+    const indexBlock = indices
+        ? Object.entries(indices).map(([k, v]) =>
+            `  ${k}: ${v.current ?? '데이터 부족'} (${v.changePct != null ? (Number(v.changePct) >= 0 ? '+' : '') + Number(v.changePct).toFixed(2) + '%' : '데이터 부족'})`
+          ).join('\n')
+        : '  지수 데이터 부족';
+
+    const macroBlock = macro ? [
+        `  기준금리: ${macro.federalFundsRate ?? '데이터 부족'}%`,
+        `  CPI: ${macro.cpi ?? '데이터 부족'}`,
+        `  실업률: ${macro.unemployment ?? '데이터 부족'}%`,
+        `  10Y채권: ${macro.tenYearYield ?? '데이터 부족'}%`,
+        `  VIX: ${macro.vix ?? '데이터 부족'}`,
+    ].join('\n') : '  거시경제 데이터 부족';
+
+    const newsItems = (news || []).slice(0, 4);
+    const newsBlock = newsItems.length > 0
+        ? newsItems.map(n => `  • [${n.publishedAt || '날짜 없음'}] ${n.title} (${n.source || '출처 없음'})`).join('\n')
+        : '  최신 뉴스 부족';
+
+    const prompt = `다음은 ${today} 기준 시장 실데이터야.
+
+[시장 지수]
+${indexBlock}
+
+[거시경제]
+${macroBlock}
+
+[시장 뉴스 (최신 ${newsItems.length}건)]
+${newsBlock}
+
+위 실데이터를 기반으로 오늘 시장 브리핑을 아래 형식으로 작성해줘.
+
+📌 결론: 오늘 시장 한줄 요약
+💹 가격/기술: 주요 지수 흐름 + VIX 기준 변동성 (실수치 반드시 포함)
+📰 뉴스: 시장 뉴스 방향성 요약 (뉴스 없으면 "최신 뉴스 부족")
+✅ 긍정 포인트: 2가지
+⚠️ 부정 포인트: 2가지
+🧠 시장 심리: 한 줄
+👉 전략 제안: 오늘 투자자별 행동 방향 (단타/스윙/장기 각 1줄)
+
+[절대 금지]
+- 데이터에 없는 수치 GPT가 만들어내기 금지
+- 뉴스 없으면 "최신 뉴스 부족" 명시
+- "몰빵", "올인", "무조건" 금지`;
+
+    try {
+        const response = await client.chat.completions.create({
+            model: MODEL_DEFAULT,
+            messages: [
+                {
+                    role: 'system',
+                    content: '너는 "예리"라는 AI 투자 비서야. 실데이터와 뉴스를 기반으로 오늘 시장 브리핑을 해. 데이터가 없으면 절대 수치를 만들어내지 마.'
+                },
+                { role: 'user', content: prompt }
+            ],
+            max_tokens: 1400,
+        });
+        return response.choices[0].message.content;
+    } catch (err) {
+        console.error(`❌ [generateMarketBriefing] 실패:`, err.message);
+        throw err;
+    }
+}
+
+module.exports = { generateWatchlistBriefing, generateDailyBriefingText, generateMarketBriefing };

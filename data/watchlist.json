@@ -1,1 +1,9 @@
-{}
+{
+  "web-default": {
+    "tickers": [
+      "NVDA",
+      "TSLA"
+    ],
+    "style": "swing"
+  }
+}

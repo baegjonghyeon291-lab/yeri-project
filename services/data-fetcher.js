@@ -1,18 +1,47 @@
 /**
  * data-fetcher.js — Full multi-source pipeline with tiered fallback chains
  *
- * Price:         TwelveData → Polygon → Tiingo → Yahoo Finance (RapidAPI)
- * Technicals:    TwelveData → AlphaVantage
- * Fundamentals:  FMP → EODHD → Yahoo Finance (RapidAPI)
- * News:          NewsAPI → Finnhub → Yahoo Finance (RapidAPI)
- * Macro:         FRED → Nasdaq Data Link
+ * Price:         TwelveData → Polygon → Tiingo → Yahoo(yf2)
+ * Technicals:    TwelveData → AlphaVantage → Yahoo(yf2 로컸계산)
+ * Fundamentals:  Yahoo(yf2) → Finnhub → EODHD
+ * News:          NewsAPI → Finnhub → Yahoo(yf2)
+ * Analyst:       Finnhub → Yahoo(yf2)
+ * Macro:         FRED
  * SEC Filings:   data.sec.gov (free, no key)
- * KR Disclos.:   DART
+ * KR 재무:       DART + Yahoo(yf2 .KS)
  */
 const axios = require('axios');
+const yahoo = require('./yahoo-finance-helper');
 
 // ─────────────────────────────────────────────
-// Simple 5-minute in-memory cache
+// API 호출 통계 추적 (세션당)
+// ─────────────────────────────────────────────
+const apiStats = new Map(); // label → { calls, success, fail, totalMs }
+
+function recordStat(label, success, ms) {
+    if (!apiStats.has(label)) apiStats.set(label, { calls: 0, success: 0, fail: 0, totalMs: 0 });
+    const s = apiStats.get(label);
+    s.calls++;
+    s.totalMs += ms;
+    if (success) s.success++; else s.fail++;
+}
+
+function getApiStats() {
+    const out = {};
+    for (const [label, s] of apiStats) {
+        out[label] = {
+            calls: s.calls,
+            success: s.success,
+            fail: s.fail,
+            failRate: s.calls ? ((s.fail / s.calls) * 100).toFixed(0) + '%' : 'n/a',
+            avgMs: s.calls ? Math.round(s.totalMs / s.calls) : 0,
+        };
+    }
+    return out;
+}
+
+// ─────────────────────────────────────────────
+// 5분 메모리 캐시
 // ─────────────────────────────────────────────
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
@@ -24,29 +53,37 @@ function fromCache(key) {
 function toCache(key, data) { cache.set(key, { ts: Date.now(), data }); }
 
 // ─────────────────────────────────────────────
-// Safe fetch — never throws, always returns null on error
+// Safe fetch — 에러 없이 null 반환 + 통계 기록
 // ─────────────────────────────────────────────
 async function safeGet(label, fn) {
+    const t0 = Date.now();
     try {
         const r = await fn();
-        if (r !== null && r !== undefined) console.log(`[✅ ${label}] OK`);
+        const ok = r !== null && r !== undefined;
+        recordStat(label, ok, Date.now() - t0);
+        if (ok) console.log(`[\u2705 ${label}] OK`);
         return r;
     } catch (e) {
         const status = e.response?.status;
-        console.warn(`[⚠️  ${label}] Failed (${status || e.code || e.message})`);
+        recordStat(label, false, Date.now() - t0);
+        const reason = status === 403 ? 'invalid key/plan'
+            : status === 429 ? 'rate limited'
+            : status === 404 ? 'not found'
+            : (e.code || e.message?.slice(0, 60));
+        console.warn(`[\u26a0\ufe0f  ${label}] Failed (${reason})`);
         return null;
     }
 }
 
 // ─────────────────────────────────────────────
-// Fallback runner — tries sources in order
+// Fallback runner — sources 순서대로 시도
 // ─────────────────────────────────────────────
 async function withFallback(label, sources) {
     for (const [name, fn] of sources) {
         const result = await safeGet(`${label}/${name}`, fn);
         if (result !== null && result !== undefined) return result;
     }
-    console.warn(`[❌ ${label}] All sources failed`);
+    console.warn(`[\u274c ${label}] All sources failed`);
     return null;
 }
 
@@ -79,13 +116,13 @@ async function getPriceData(ticker) {
                 source: 'TwelveData'
             };
         }],
+        // 2순위: Polygon
         ['Polygon', async () => {
             const key = process.env.POLYGON_API_KEY;
             if (!key) return null;
             const res = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?apiKey=${key}`, { timeout: 8000 });
             const r = res.data.results?.[0];
             if (!r) return null;
-            // Get current quote
             const q = await axios.get(`https://api.polygon.io/v2/last/trade/${ticker}?apiKey=${key}`, { timeout: 5000 }).catch(() => null);
             const current = q?.data?.results?.p || r.c;
             return {
@@ -96,44 +133,8 @@ async function getPriceData(ticker) {
                 volume: r.v, source: 'Polygon'
             };
         }],
-        ['Tiingo', async () => {
-            const key = process.env.TIINGO_API_KEY;
-            if (!key) return null;
-            const res = await axios.get(`https://api.tiingo.com/tiingo/daily/${ticker}/prices?token=${key}`, { timeout: 8000 });
-            const d = res.data?.[0];
-            if (!d) return null;
-            return {
-                current: d.close, open: d.open, high: d.high, low: d.low,
-                prevClose: d.adjClose, change: null, changePct: null,
-                volume: d.volume, source: 'Tiingo'
-            };
-        }],
-        ['Yahoo/RapidAPI', async () => {
-            const key = process.env.RAPIDAPI_KEY;
-            if (!key) return null;
-            const res = await axios.get('https://yahoo-finance15.p.rapidapi.com/api/v1/markets/quote', {
-                params: { ticker, type: 'STOCKS' },
-                headers: { 'X-RapidAPI-Key': key, 'X-RapidAPI-Host': 'yahoo-finance15.p.rapidapi.com' },
-                timeout: 8000
-            });
-            const d = res.data?.body;
-            if (!d) return null;
-            const currentPrice = d.regularMarketPrice ?? d.price ?? null;
-            if (!currentPrice) return null; // 가격 없으면 소스 무효
-            return {
-                current: currentPrice,
-                open: d.regularMarketOpen ?? null,
-                high: d.regularMarketDayHigh ?? null,
-                low: d.regularMarketDayLow ?? null,
-                prevClose: d.regularMarketPreviousClose ?? null,
-                change: d.regularMarketChange ?? null,
-                changePct: d.regularMarketChangePercent ?? null,
-                volume: d.regularMarketVolume ?? null,
-                fifty2High: d.fiftyTwoWeekHigh ?? null,
-                fifty2Low: d.fiftyTwoWeekLow ?? null,
-                source: 'Yahoo'
-            };
-        }]
+        // 3순위: Yahoo Finance (yf2) — 한국 포함 보편적
+        ['Yahoo/yahoo-finance2', () => yahoo.getYahooPrice(ticker)]
     ]);
 
     if (data) toCache(cacheKey, data);
@@ -215,7 +216,8 @@ async function getPriceHistory(ticker) {
                 closes: closes.slice(-30), // Increased for charts
                 source: 'Tiingo'
             };
-        }]
+        }],
+        ['Yahoo/yahoo-finance2', () => yahoo.getYahooHistory(ticker)]
     ]);
 
     if (data) toCache(cacheKey, data);
@@ -286,8 +288,12 @@ async function getTechnicalIndicators(ticker) {
             source: 'AlphaVantage'
         };
     });
-    if (av) toCache(cacheKey, av);
-    return av;
+    if (av) { toCache(cacheKey, av); return av; }
+
+    // Final Fallback: Yahoo Finance (로컬 계산)
+    const yh = await safeGet('Tech/Yahoo', () => yahoo.getYahooTechnicals(ticker));
+    if (yh) toCache(cacheKey, yh);
+    return yh;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -316,7 +322,7 @@ async function getBollingerBands(ticker) {
 }
 
 // ═══════════════════════════════════════════════════════
-// ⑤ FUNDAMENTALS — FMP → EODHD → Yahoo Finance
+// ⑤ FUNDAMENTALS — Yahoo(yf2) → Finnhub → EODHD
 // ═══════════════════════════════════════════════════════
 async function getFundamentals(ticker) {
     const cacheKey = `fund_${ticker}`;
@@ -324,75 +330,10 @@ async function getFundamentals(ticker) {
     if (cached) return cached;
 
     const data = await withFallback('Fundamentals', [
-        ['FMP', async () => {
-            const key = process.env.FMP_API_KEY;
-            if (!key) return null;
-            const [profileR, ratiosR, incomeR, earningsR] = await Promise.allSettled([
-                axios.get(`https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${key}`, { timeout: 8000 }),
-                axios.get(`https://financialmodelingprep.com/api/v3/ratios-ttm/${ticker}?apikey=${key}`, { timeout: 8000 }),
-                axios.get(`https://financialmodelingprep.com/api/v3/income-statement/${ticker}?limit=4&apikey=${key}`, { timeout: 8000 }),
-                axios.get(`https://financialmodelingprep.com/api/v3/earning_calendar?symbol=${ticker}&apikey=${key}`, { timeout: 8000 })
-            ]);
-            const profile = profileR.status === 'fulfilled' ? profileR.value.data?.[0] : {};
-            const ratios = ratiosR.status === 'fulfilled' ? ratiosR.value.data?.[0] : {};
-            const income = incomeR.status === 'fulfilled' ? incomeR.value.data : [];
-            const earnings = earningsR.status === 'fulfilled' ? earningsR.value.data : [];
-            const latestIncome = income?.[0] || {};
-            const prevIncome = income?.[1] || {};
-            const revGrowth = latestIncome.revenue && prevIncome.revenue
-                ? (((latestIncome.revenue - prevIncome.revenue) / prevIncome.revenue) * 100).toFixed(1) + '%'
-                : null;
-            const nextEarnings = earnings?.find(e => new Date(e.date) > new Date());
-            return {
-                companyName: profile?.companyName,
-                sector: profile?.sector,
-                industry: profile?.industry,
-                mktCap: profile?.mktCap,
-                beta: profile?.beta,
-                peRatio: ratios?.priceEarningsRatioTTM ? parseFloat(ratios.priceEarningsRatioTTM).toFixed(2) : null,
-                eps: ratios?.epsTTM ? parseFloat(ratios.epsTTM).toFixed(2) : null,
-                forwardPE: ratios?.priceToEarningsRatio ? parseFloat(ratios.priceToEarningsRatio).toFixed(2) : null,
-                pbRatio: ratios?.priceToBookRatioTTM ? parseFloat(ratios.priceToBookRatioTTM).toFixed(2) : null,
-                debtToEquity: ratios?.debtEquityRatioTTM ? parseFloat(ratios.debtEquityRatioTTM).toFixed(2) : null,
-                netMargin: ratios?.netProfitMarginTTM ? (parseFloat(ratios.netProfitMarginTTM) * 100).toFixed(1) + '%' : null,
-                roe: ratios?.returnOnEquityTTM ? (parseFloat(ratios.returnOnEquityTTM) * 100).toFixed(1) + '%' : null,
-                revenueGrowthYoY: revGrowth,
-                revenue: latestIncome.revenue,
-                grossProfit: latestIncome.grossProfit,
-                nextEarningsDate: nextEarnings?.date || null,
-                nextEarningsEPS: nextEarnings?.eps || null,
-                source: 'FMP'
-            };
-        }],
-        ['EODHD', async () => {
-            const key = process.env.EODHD_API_KEY;
-            if (!key) return null;
-            const res = await axios.get(`https://eodhd.com/api/fundamentals/${ticker}.US?api_token=${key}&fmt=json`, { timeout: 10000 });
-            const d = res.data;
-            const gen = d?.General;
-            const hi = d?.Highlights;
-            const val = d?.Valuation;
-            if (!gen) return null;
-            return {
-                companyName: gen.Name,
-                sector: gen.Sector,
-                industry: gen.Industry,
-                mktCap: hi?.MarketCapitalization,
-                beta: hi?.Beta,
-                peRatio: hi?.PERatio ? parseFloat(hi.PERatio).toFixed(2) : null,
-                eps: hi?.EPS ? parseFloat(hi.EPS).toFixed(2) : null,
-                forwardPE: hi?.ForwardPE ? parseFloat(hi.ForwardPE).toFixed(2) : null,
-                pbRatio: val?.PriceBookMRQ ? parseFloat(val.PriceBookMRQ).toFixed(2) : null,
-                debtToEquity: hi?.TotalDebt ? null : null,
-                netMargin: hi?.ProfitMargin ? (parseFloat(hi.ProfitMargin) * 100).toFixed(1) + '%' : null,
-                roe: hi?.ReturnOnEquityTTM ? (parseFloat(hi.ReturnOnEquityTTM) * 100).toFixed(1) + '%' : null,
-                revenueGrowthYoY: hi?.QuarterlyRevenueGrowthYOY ? (parseFloat(hi.QuarterlyRevenueGrowthYOY) * 100).toFixed(1) + '%' : null,
-                revenue: hi?.RevenueTTM,
-                grossProfit: null,
-                nextEarningsDate: null,
-                source: 'EODHD'
-            };
-        }],
+        // 1순위: Yahoo Finance (FCF/Revenue/NetIncome/ROE 등 핵심 재무 안정 제공)
+        ['Yahoo/yahoo-finance2', () => yahoo.getYahooFundamentals(ticker)],
+
+        // 2순위: Finnhub (글로벌 주식 재무 지표)
         ['Finnhub', async () => {
             const key = process.env.FINNHUB_API_KEY;
             if (!key) return null;
@@ -423,33 +364,35 @@ async function getFundamentals(ticker) {
                 source: 'Finnhub'
             };
         }],
-        ['Yahoo/RapidAPI', async () => {
-            const key = process.env.RAPIDAPI_KEY;
+
+        // 3순위: EODHD
+        ['EODHD', async () => {
+            const key = process.env.EODHD_API_KEY;
             if (!key) return null;
-            const res = await axios.get('https://yahoo-finance15.p.rapidapi.com/api/v1/markets/quote', {
-                params: { ticker, type: 'STOCKS' },
-                headers: { 'X-RapidAPI-Key': key, 'X-RapidAPI-Host': 'yahoo-finance15.p.rapidapi.com' },
-                timeout: 8000
-            });
-            const d = res.data?.body;
-            if (!d) return null;
+            const res = await axios.get(`https://eodhd.com/api/fundamentals/${ticker}.US?api_token=${key}&fmt=json`, { timeout: 10000 });
+            const d = res.data;
+            const gen = d?.General;
+            const hi = d?.Highlights;
+            const val = d?.Valuation;
+            if (!gen) return null;
             return {
-                companyName: d.longName || d.shortName,
-                sector: d.sector,
-                industry: d.industry,
-                mktCap: d.marketCap,
-                beta: d.beta,
-                peRatio: d.trailingPE ? parseFloat(d.trailingPE).toFixed(2) : null,
-                eps: d.epsTrailingTwelveMonths ? parseFloat(d.epsTrailingTwelveMonths).toFixed(2) : null,
-                forwardPE: d.forwardPE ? parseFloat(d.forwardPE).toFixed(2) : null,
-                pbRatio: d.priceToBook ? parseFloat(d.priceToBook).toFixed(2) : null,
+                companyName: gen.Name,
+                sector: gen.Sector,
+                industry: gen.Industry,
+                mktCap: hi?.MarketCapitalization,
+                beta: hi?.Beta,
+                peRatio: hi?.PERatio ? parseFloat(hi.PERatio).toFixed(2) : null,
+                eps: hi?.EPS ? parseFloat(hi.EPS).toFixed(2) : null,
+                forwardPE: hi?.ForwardPE ? parseFloat(hi.ForwardPE).toFixed(2) : null,
+                pbRatio: val?.PriceBookMRQ ? parseFloat(val.PriceBookMRQ).toFixed(2) : null,
                 debtToEquity: null,
-                netMargin: null, roe: null,
-                revenueGrowthYoY: null,
-                revenue: d.totalRevenue,
+                netMargin: hi?.ProfitMargin ? (parseFloat(hi.ProfitMargin) * 100).toFixed(1) + '%' : null,
+                roe: hi?.ReturnOnEquityTTM ? (parseFloat(hi.ReturnOnEquityTTM) * 100).toFixed(1) + '%' : null,
+                revenueGrowthYoY: hi?.QuarterlyRevenueGrowthYOY ? (parseFloat(hi.QuarterlyRevenueGrowthYOY) * 100).toFixed(1) + '%' : null,
+                revenue: hi?.RevenueTTM,
                 grossProfit: null,
                 nextEarningsDate: null,
-                source: 'Yahoo'
+                source: 'EODHD'
             };
         }]
     ]);
@@ -459,9 +402,6 @@ async function getFundamentals(ticker) {
 }
 
 
-// ═══════════════════════════════════════════════════════
-// ⑥ NEWS — NewsAPI → Finnhub → Yahoo Finance
-// ═══════════════════════════════════════════════════════
 async function getNews(query, ticker = null) {
     const results = await Promise.allSettled([
         // NewsAPI
@@ -497,6 +437,13 @@ async function getNews(query, ticker = null) {
     for (const r of results) {
         if (r.status === 'fulfilled' && r.value?.length) all.push(...r.value);
     }
+
+    // Yahoo fallback (뉴스가 아예 없을 때만)
+    if (!all.length && ticker) {
+        const yhNews = await yahoo.getYahooNews(ticker);
+        if (yhNews?.length) all.push(...yhNews);
+    }
+
     const seen = new Set();
     return all.filter(n => {
         if (!n.title || seen.has(n.title)) return false;
@@ -585,6 +532,7 @@ async function getMacroData() {
     if (cached) return cached;
 
     const data = await withFallback('Macro', [
+        // FRED — VIX/금리/CPI 확인된 정상 동작
         ['FRED', async () => {
             const key = process.env.FRED_API_KEY?.trim();
             if (!key) return null;
@@ -606,20 +554,8 @@ async function getMacroData() {
                 dataDate: new Date().toISOString().slice(0, 10),
                 source: 'FRED'
             };
-        }],
-        ['NasdaqDataLink', async () => {
-            const key = process.env.NASDAQ_API_KEY;
-            if (!key) return null;
-            // Use Quandl/Nasdaq Data Link for FRED-equivalent data
-            const res = await axios.get(`https://data.nasdaq.com/api/v3/datasets/FRED/FEDFUNDS.json?api_key=${key}&rows=1`, { timeout: 8000 });
-            const rate = res.data?.dataset?.data?.[0]?.[1];
-            return {
-                federalFundsRate: rate ? String(rate) : null,
-                cpi: null, unemployment: null, tenYearYield: null, vix: null,
-                dataDate: new Date().toISOString().slice(0, 10),
-                source: 'NASDAQ'
-            };
         }]
+        // NASDAQ Quandl 제거: WIKI DB 2018년 서비스 종료, 완전 불가
     ]);
 
     if (data) toCache(cacheKey, data);
@@ -715,8 +651,24 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         };
     }
 
-    console.log(`[DataFetcher] ✅ Pipeline complete for: ${ticker}`);
-    console.log(`[DataSource] price_source=${price?.source || 'none'} | fundamental_source=${fundamentals?.source || 'none'} | news_count=${news?.length || 0} | macro_source=${macro?.source || 'none'}`);
+    // ── 검증 로그 (디버그/감사용) ──────────────────────────────
+    const vLog = [
+        `\n${'═'.repeat(50)}`,
+        `[검증로그] ticker resolved:  ${ticker}`,
+        `[검증로그] price source:     ${price?.source || '❌ FAILED'} | current: ${price?.current ?? 'N/A'}`,
+        `[검증로그] RSI loaded:       ${technical?.rsi != null ? technical.rsi.toFixed(2) : '❌ N/A'} | source: ${technical?.source || 'none'}`,
+        `[검증로그] EMA20:            ${technical?.ema20 ?? 'N/A'} | EMA50: ${technical?.ema50 ?? 'N/A'}`,
+        `[검증로그] fundamentals:     ${fundamentals?.source || '❌ FAILED'} | PER: ${fundamentals?.peRatio ?? 'N/A'}`,
+        `[검증로그] news count:       ${news?.length || 0}`,
+        `[검증로그] macro source:     ${macro?.source || '❌ FAILED'} | VIX: ${macro?.vix ?? 'N/A'}`,
+        `[검증로그] analyst:          ${analystRatings?.source || 'none'} | target: ${analystRatings?.consensus?.targetMean ?? 'N/A'}`,
+        `[검증로그] support/resist:   ${supportResist ? `S:${supportResist.support} R:${supportResist.resistance}` : 'N/A'}`,
+        `[검증로그] 52w high/low:     ${price?.fifty2High ?? 'N/A'} / ${price?.fifty2Low ?? 'N/A'}`,
+        `${'─'.repeat(50)}`,
+        `[DataFetcher] ✅ Pipeline complete for: ${ticker}`,
+    ];
+    console.log(vLog.join('\n'));
+
     return { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist };
 }
 
@@ -738,4 +690,76 @@ async function fetchSectorData(sectorInfo) {
     return { sector: sectorInfo.sector, stocks, marketData };
 }
 
-module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData };
+// ═══════════════════════════════════════════════════════
+// 데이터 신뢰도 산출 시스템 — FULL / PARTIAL / NO_DATA
+// ═══════════════════════════════════════════════════════
+function computeDataReliability(data) {
+    const checks = {
+        price:        { weight: 30, ok: data.price?.current != null },
+        technical:    { weight: 25, ok: data.technical?.rsi != null },
+        fundamentals: { weight: 20, ok: data.fundamentals?.peRatio != null || data.fundamentals?.revenue != null },
+        news:         { weight: 15, ok: (data.news?.length || 0) >= 1 },
+        macro:        { weight: 10, ok: data.macro?.vix != null },
+    };
+
+    let totalWeight = 0;
+    let earnedWeight = 0;
+    const available = [];
+    const missing = [];
+
+    for (const [key, { weight, ok }] of Object.entries(checks)) {
+        totalWeight += weight;
+        if (ok) {
+            earnedWeight += weight;
+            available.push(key);
+        } else {
+            missing.push(key);
+        }
+    }
+
+    const pct = totalWeight > 0 ? (earnedWeight / totalWeight) * 100 : 0;
+
+    // 등급 결정
+    let tier, label, emoji;
+    if (!checks.price.ok) {
+        // 가격 데이터조차 없으면 무조건 NO_DATA
+        tier = 'NO_DATA';
+        label = '분석 불가';
+        emoji = '🔴';
+    } else if (pct >= 80) {
+        tier = 'FULL';
+        label = '전체 분석 가능';
+        emoji = '🟢';
+    } else if (pct >= 40) {
+        tier = 'PARTIAL';
+        label = '부분 분석 가능';
+        emoji = '🟡';
+    } else {
+        tier = 'NO_DATA';
+        label = '분석 불가';
+        emoji = '🔴';
+    }
+
+    const reliability = pct >= 80 ? 'HIGH' : pct >= 50 ? 'MEDIUM' : 'LOW';
+
+    const summary = {
+        tier,         // FULL | PARTIAL | NO_DATA
+        reliability,  // HIGH | MEDIUM | LOW
+        label,
+        emoji,
+        pct: Math.round(pct),
+        available,
+        missing,
+        detail: Object.fromEntries(
+            Object.entries(checks).map(([k, v]) => [k, { loaded: v.ok, weight: v.weight }])
+        ),
+    };
+
+    console.log(`[DataReliability] ${emoji} ${tier} (${summary.pct}%) — 신뢰도: ${reliability}`);
+    console.log(`[DataReliability] ✅ 확보: ${available.join(', ') || 'none'}`);
+    if (missing.length) console.log(`[DataReliability] ❌ 미확보: ${missing.join(', ')}`);
+
+    return summary;
+}
+
+module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData, getApiStats, computeDataReliability };

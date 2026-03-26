@@ -903,8 +903,107 @@ function parseNumberedFollowup(text) {
     return { index, intent };
 }
 
+/**
+ * suggestCandidates(text) — 유사 종목 후보 TOP 5 + confidence 반환
+ * tier: HIGH(>=0.8 자동선택) | MED(0.5~0.8 확인질문) | LOW(<0.5 리스트)
+ */
+function suggestCandidates(text) {
+    const cleaned = (text || '').trim();
+    const lower = cleaned.toLowerCase().replace(/\s/g, '');
+
+    // 1) 정확 매칭
+    const exact = resolveStock(cleaned);
+    if (exact) {
+        return {
+            input: text, resolved: exact, confidence: 1.0, tier: 'HIGH',
+            candidates: [{ ticker: exact.ticker, name: exact.name, market: exact.market, confidence: 1.0 }],
+        };
+    }
+
+    // 2) fuzzy 스코어링
+    const allKeys = [
+        ...Object.keys(US_COMPANY_MAP).map(k => ({ key: k, info: US_COMPANY_MAP[k], market: 'US' })),
+        ...Object.keys(ETF_MAP).map(k => ({ key: k, info: ETF_MAP[k], market: 'US' })),
+        ...Object.keys(KR_COMPANY_MAP).map(k => ({ key: k, info: KR_COMPANY_MAP[k], market: 'KR' })),
+    ];
+
+    const scored = allKeys.map(c => {
+        let score = 0;
+        for (let len = Math.min(lower.length, c.key.length); len >= 2; len--) {
+            for (let i = 0; i <= lower.length - len; i++) {
+                if (c.key.includes(lower.substring(i, i + len))) { score = Math.max(score, len); break; }
+            }
+            if (score > 0) break;
+        }
+        return { ...c, score, ratio: score / Math.max(lower.length, 1) };
+    }).filter(c => c.score >= 2)
+      .sort((a, b) => b.ratio !== a.ratio ? b.ratio - a.ratio : b.score - a.score)
+      .slice(0, 5);
+
+    if (!scored.length) return { input: text, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
+
+    const best = scored[0];
+    const confidence = Math.min(best.ratio, 1.0);
+    const tier = confidence >= 0.8 ? 'HIGH' : confidence >= 0.5 ? 'MED' : 'LOW';
+
+    return {
+        input: text,
+        resolved: tier === 'HIGH'
+            ? { ticker: best.info.ticker, name: best.info.name, market: best.market, corpCode: best.info.corpCode || null }
+            : null,
+        confidence, tier,
+        candidates: scored.map(c => ({ ticker: c.info.ticker, name: c.info.name, market: c.market, confidence: Math.min(c.ratio, 1.0) })),
+    };
+}
+
+// ──────────────────────────────────────────────────────────
+// COMPARISON RESOLVER — 비교 질문에서 두 종목 동시 추출
+// ──────────────────────────────────────────────────────────
+/**
+ * "NVDA vs TSLA", "삼성전자랑 엔비디아 비교", "애플 대비 구글" 등에서 두 종목 추출
+ * @returns {{ stockA: object, stockB: object } | null}
+ */
+function resolveComparisonStocks(text) {
+    // 비교 키워드/분리자를 기준으로 텍스트를 둘로 분리
+    // 순서 중요: 긴 패턴 먼저 매칭 ("이랑" before "랑")
+    const separators = /\s+(?:vs\.?|VS\.?|versus)\s+|(?:이랑|랑|하고|과\s|와\s|대비|비교(?:해|해줘|해봐)?\s*)\s*/;
+    
+    // 먼저 비교 관련 접미사를 제거
+    let cleaned = text
+        .replace(/\s*(비교해\s*줘|비교해봐|비교해|비교|어느게\s*나아|뭐가\s*나아|뭐가\s*좋아|둘\s*중\s*어느|어때)\s*[?？]?\s*$/gi, '')
+        .trim();
+    
+    const parts = cleaned.split(separators).map(p => p.trim()).filter(Boolean);
+    
+    if (parts.length >= 2) {
+        const stockA = resolveStock(parts[0]);
+        const stockB = resolveStock(parts[1]);
+        if (stockA && stockB && stockA.ticker !== stockB.ticker) {
+            return { stockA, stockB };
+        }
+    }
+    
+    // fallback: 텍스트에서 공백으로 분리 후 각각 resolveStock 시도
+    // "NVDA TSLA 비교" 같은 경우
+    const tokens = cleaned.replace(/\s*(비교|vs\.?|VS\.?)\s*/g, ' ').trim().split(/\s+/);
+    if (tokens.length >= 2) {
+        for (let i = 0; i < tokens.length - 1; i++) {
+            const a = resolveStock(tokens[i]);
+            if (!a) continue;
+            for (let j = i + 1; j < tokens.length; j++) {
+                const b = resolveStock(tokens[j]);
+                if (b && a.ticker !== b.ticker) {
+                    return { stockA: a, stockB: b };
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
 module.exports = {
-    resolveKoreanTicker, resolveUSCompany, resolveStock,
+    resolveKoreanTicker, resolveUSCompany, resolveStock, resolveComparisonStocks, suggestCandidates,
     resolveSector, toFinnhubKRFormat, isDeepAnalysisRequest,
     hasStockKeyword, hasEarningsKeyword, extractCompanyName,
     getPeers, getETFPeers, findClosestAlias,
