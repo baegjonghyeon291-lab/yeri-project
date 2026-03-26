@@ -37,6 +37,7 @@ console.log(`✅ OPENAI_API_KEY: ${maskedKey} confirmed`);
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const {
     analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming,
@@ -67,6 +68,10 @@ const { scanWatchlist, invalidateCache } = require('./services/alert-engine');
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ── 정적 파일 서빙 (웹앱 프론트엔드) ──────────────────────────────
+const webappDist = path.join(__dirname, 'yeri-webapp', 'dist');
+app.use(express.static(webappDist));
 
 // Render는 PORT 환경변수를 자동 주입 — API_PORT fallback 유지
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
@@ -576,6 +581,11 @@ app.get('/api/stocks/min-data', async (req, res) => {
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });
     }
+});
+
+// ── SPA fallback — API 이외 GET 요청은 webapp index.html 서빙 ──
+app.get('*', (req, res) => {
+    res.sendFile(path.join(webappDist, 'index.html'));
 });
 
 app.listen(PORT, '0.0.0.0', () => {

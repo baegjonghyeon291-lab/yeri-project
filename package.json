@@ -5,6 +5,7 @@
   "main": "api-server.js",
   "scripts": {
     "start": "node api-server.js",
+    "build": "cd yeri-webapp && npm install && npm run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
