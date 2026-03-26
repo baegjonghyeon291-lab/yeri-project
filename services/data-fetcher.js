@@ -554,8 +554,30 @@ async function getMacroData() {
                 dataDate: new Date().toISOString().slice(0, 10),
                 source: 'FRED'
             };
+        }],
+        // FRED 실패 시 Yahoo (VIX, 10Y채권 금리만이라도 확보)
+        ['YahooFallback', async () => {
+            const [vix, tnx] = await Promise.allSettled([
+                yahoo.getYahooPrice('^VIX'),
+                yahoo.getYahooPrice('^TNX')
+            ]);
+            
+            const vixVal = vix.status === 'fulfilled' ? vix.value?.current : null;
+            const tnxVal = tnx.status === 'fulfilled' ? tnx.value?.current : null;
+            
+            if (!vixVal && !tnxVal) return null;
+            
+            return {
+                federalFundsRate: null,
+                cpi: null,
+                unemployment: null,
+                tenYearYield: tnxVal,
+                vix: vixVal,
+                breakEvenInflation: null,
+                dataDate: new Date().toISOString().slice(0, 10),
+                source: 'Yahoo'
+            };
         }]
-        // NASDAQ Quandl 제거: WIKI DB 2018년 서비스 종료, 완전 불가
     ]);
 
     if (data) toCache(cacheKey, data);
@@ -584,6 +606,11 @@ async function getMarketIndices() {
             const r = res.data.results?.[0];
             if (!r) return null;
             return { current: r.c, changePct: ((r.c - r.o) / r.o * 100) };
+        }},
+        { provider: 'Yahoo', symbols: { 'S&P 500': '^GSPC', 'NASDAQ': '^IXIC', 'DOW': '^DJI' }, fn: async (sym) => {
+            const data = await yahoo.getYahooPrice(sym);
+            if (!data) return null;
+            return { current: data.current, changePct: data.changePercent };
         }}
     ];
 

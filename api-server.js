@@ -401,6 +401,21 @@ app.post('/api/chat', async (req, res) => {
                     })),
                 });
                 return res.json({ messages });
+            } else if (suggestion && suggestion.candidates && suggestion.candidates.length > 0) {
+                // API 통합검색은 실패했으나, 로컬 사전에 유사 후보가 있는 경우 무조건 추천 버튼 표시
+                messages.push({
+                    type: 'candidates',
+                    content: `"${extracted}" 종목을 정확히 찾지 못했어요.\n혹시 아래 종목 중 하나를 말씀하신 건가요?`,
+                    candidates: suggestion.candidates.slice(0, 3).map(c => ({
+                        ticker: c.ticker,
+                        name: c.name,
+                        market: c.market || 'US',
+                        confidence: c.confidence,
+                        tier: c.tier || 'LOW',
+                        desc: getCompanyDesc(c.ticker) || null,
+                    })),
+                });
+                return res.json({ messages });
             }
 
             // ── 3) 모두 실패 ──

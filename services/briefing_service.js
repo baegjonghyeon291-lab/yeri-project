@@ -194,6 +194,12 @@ async function generateMarketBriefing() {
 
     const { indices, macro, news } = marketData;
 
+    // 데이터 충분히 수집되었는지 확인 (최소 S&P 500과 VIX 여부)
+    const validDataCount = (indices?.['S&P 500'] ? 1 : 0) + (indices?.['NASDAQ'] ? 1 : 0) + (macro?.vix ? 1 : 0) + (macro?.tenYearYield ? 1 : 0);
+    if (validDataCount < 2) {
+        return '시장 데이터를 충분히 확보하지 못해 브리핑을 생성할 수 없습니다. (데이터 소스 응답 지연)\n\n잠시 후 다시 시도해 주세요.';
+    }
+
     const indexBlock = indices
         ? Object.entries(indices).map(([k, v]) =>
             `  ${k}: ${v.current ?? '데이터 부족'} (${v.changePct != null ? (Number(v.changePct) >= 0 ? '+' : '') + Number(v.changePct).toFixed(2) + '%' : '데이터 부족'})`
