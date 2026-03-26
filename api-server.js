@@ -37,7 +37,6 @@ console.log(`✅ OPENAI_API_KEY: ${maskedKey} confirmed`);
 
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 
 const {
     analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming,
@@ -584,8 +583,12 @@ app.get('/api/stocks/min-data', async (req, res) => {
 });
 
 // ── SPA fallback — API 이외 GET 요청은 webapp index.html 서빙 ──
-app.get('*', (req, res) => {
-    res.sendFile(path.join(webappDist, 'index.html'));
+app.use((req, res) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api/')) {
+        res.sendFile(path.join(webappDist, 'index.html'));
+    } else {
+        res.status(404).json({ error: 'Not found' });
+    }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
