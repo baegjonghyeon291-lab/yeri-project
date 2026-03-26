@@ -695,6 +695,92 @@ function isDeepAnalysisRequest(text) {
 }
 
 // ──────────────────────────────────────────────────────────
+// COMPANY DESC — 후보 UI에 표시할 간단 설명
+// ──────────────────────────────────────────────────────────
+const COMPANY_DESC = {
+    'AAPL': '아이폰, 맥, 에어팟 제조',
+    'MSFT': 'Windows, Azure 클라우드, Office',
+    'GOOGL': '구글 검색, 유튜브, 안드로이드',
+    'AMZN': '이커머스, AWS 클라우드',
+    'META': '페이스북, 인스타그램, 메타버스',
+    'TSLA': '전기차, 에너지, 자율주행',
+    'NVDA': 'GPU, AI 반도체, 데이터센터',
+    'AMD': 'CPU, GPU 반도체',
+    'AVGO': '반도체, 네트워킹 칩',
+    'TSM': '세계 최대 반도체 파운드리',
+    'INTC': 'CPU 반도체, 파운드리',
+    'NFLX': '글로벌 스트리밍 서비스',
+    'DIS': '디즈니+, 테마파크, 엔터',
+    'PLTR': 'AI 데이터 분석 플랫폼',
+    'SNOW': '클라우드 데이터 웨어하우스',
+    'CRM': 'Salesforce CRM 클라우드',
+    'COIN': '암호화폐 거래소',
+    'SQ': 'Block(Square) 핀테크 결제',
+    'PYPL': '온라인 결제 서비스',
+    'SOFI': '디지털 금융 서비스',
+    'HOOD': '무수수료 주식거래 앱',
+    'UBER': '라이드셰어, 배달 플랫폼',
+    'BABA': '알리바바 이커머스',
+    'NIO': '중국 전기차 스타트업',
+    'RIVN': '전기 픽업트럭, SUV',
+    'LCID': '럭셔리 전기차',
+    'SOUN': 'AI 음성인식 플랫폼',
+    'IONQ': '양자 컴퓨팅',
+    'BBAI': 'AI/빅데이터 분석 (국방)',
+    'ARM': 'ARM 칩 설계 아키텍처',
+    'SMCI': 'AI 서버, 데이터센터 인프라',
+    'CRWD': '사이버보안 클라우드',
+    'PANW': '차세대 사이버보안',
+    'DELL': 'PC, 서버, 스토리지',
+    'SHOP': '이커머스 플랫폼',
+    'V': '글로벌 결제 네트워크',
+    'MA': '글로벌 결제 네트워크',
+    'JPM': '미국 최대 은행',
+    'LLY': '비만치료제(GLP-1), 바이오',
+    'NVO': '노보노디스크 비만/당뇨 치료',
+    'DUOL': '듀오링고 AI 어학 학습',
+    'MRVL': 'AI 네트워크 반도체',
+    'MU': 'DRAM/NAND 메모리 반도체',
+    'DASH': 'DoorDash 음식 배달',
+    'QQQ': 'NASDAQ 100 추종 ETF',
+    'SPY': 'S&P 500 추종 ETF',
+    'VOO': 'Vanguard S&P 500 ETF',
+    'TQQQ': 'NASDAQ 100 3배 레버리지',
+    'SOXL': '반도체 3배 레버리지',
+    '005930': '삼성전자 (반도체, 스마트폰)',
+    '000660': 'SK하이닉스 (메모리 반도체)',
+    '373220': 'LG에너지솔루션 (배터리)',
+    '035420': 'NAVER (검색, 커머스)',
+    '035720': '카카오 (메신저, 핀테크)',
+};
+
+function getCompanyDesc(ticker) {
+    return COMPANY_DESC[ticker?.toUpperCase()] || null;
+}
+
+// ──────────────────────────────────────────────────────────
+// RESOLVE CACHE — 동일 입력 반복 시 캐싱 (5분 TTL, 200개 제한)
+// ──────────────────────────────────────────────────────────
+const RESOLVE_CACHE = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5분
+const CACHE_MAX = 200;
+
+function getCached(key) {
+    const entry = RESOLVE_CACHE.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.ts > CACHE_TTL) { RESOLVE_CACHE.delete(key); return null; }
+    return entry.val;
+}
+
+function setCache(key, val) {
+    if (RESOLVE_CACHE.size >= CACHE_MAX) {
+        const oldest = RESOLVE_CACHE.keys().next().value;
+        RESOLVE_CACHE.delete(oldest);
+    }
+    RESOLVE_CACHE.set(key, { val, ts: Date.now() });
+}
+
+// ──────────────────────────────────────────────────────────
 // STOCK KEYWORDS — 종목 질문 감지
 // ──────────────────────────────────────────────────────────
 const STOCK_KEYWORDS = [
@@ -705,12 +791,19 @@ const STOCK_KEYWORDS = [
     '사도될까', '들어가도돼', '올라갈까', '떨어질까', '추매', '물타기',
     '전후', '전략', '대응', '비교', '뭐가나아', '뭐가좋아',
     '얼마까지', '바닥', '천장', '고점', '저점', '지지', '저항',
-    // ★ 과열/밸류/비교 키워드 추가
     '과열', '과매수', '너무올랐', '너무올라', '고점이야', '과열구간', '추격매수',
     '비싸', '고평가', '밸류', '밸류부담', '비교', 'vs',
     '어느게나아', '둘중어느', '얼마나올랐', '올란거아니야',
 ];
 
+const NOISE_WORDS = [
+    '분석', '어때', '추천', '주가', '전망', '해줘', '알려줘', '해봐',
+    '풀분석', '좀', '요', '해', '줘', '사도돼', '사도될까', '살까',
+    '들어가도', '들어가도돼', '올라갈까', '떨어질까', '지금', '현재',
+    '리스크', '위험', '매수', '매도', '언제사', '언제팔', '목표가',
+    '익절', '손절', '타이밍', '괜찮아', '위험해', '팔아', '사야',
+    '과열', '고평가', '비싸', '밸류', '실적', '어닝', '비교',
+];
 
 function hasStockKeyword(text) {
     const lower = text.replace(/\s/g, '').toLowerCase();
@@ -725,128 +818,213 @@ function extractCompanyName(text) {
 }
 
 // ──────────────────────────────────────────────────────────
-// UNIFIED STOCK RESOLVER — 이름/별칭/티커 모두 처리
+// NORMALIZE — 공통 입력 정규화 (소문자화 + 노이즈 제거 + 특수문자 제거)
+// ──────────────────────────────────────────────────────────
+function normalize(raw) {
+    let s = (raw || '').trim();
+    // 소문자화
+    s = s.toLowerCase();
+    // 특수문자 제거 (한글/영문/숫자만 유지)
+    s = s.replace(/[^a-z0-9가-힣\s]/g, '');
+    // 노이즈 단어 제거
+    for (const w of NOISE_WORDS) {
+        s = s.replace(new RegExp(w, 'g'), '');
+    }
+    // 공백 제거
+    s = s.replace(/\s+/g, '').trim();
+    return s;
+}
+
+// ──────────────────────────────────────────────────────────
+// LEVENSHTEIN DISTANCE — 편집 거리 기반 fuzzy matching
+// ──────────────────────────────────────────────────────────
+function levenshteinDistance(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i - 1] === b[j - 1]
+                ? dp[i - 1][j - 1]
+                : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+        }
+    }
+    return dp[m][n];
+}
+
+// 유사도 점수 (0~1, 높을수록 유사)
+function similarityScore(input, target) {
+    const maxLen = Math.max(input.length, target.length);
+    if (maxLen === 0) return 1;
+    const dist = levenshteinDistance(input, target);
+    return 1 - dist / maxLen;
+}
+
+// ──────────────────────────────────────────────────────────
+// UNIFIED STOCK RESOLVER — 3단계 엔진 (exact → alias → fuzzy)
 // ──────────────────────────────────────────────────────────
 function resolveStock(text) {
     const cleaned = extractCompanyName(text);
     const lower = cleaned.toLowerCase().replace(/\s/g, '');
+    const normalized = normalize(text);
+
+    // 캐시 확인
+    const cacheKey = `resolve:${normalized}`;
+    const cached = getCached(cacheKey);
+    if (cached !== null) {
+        console.log(`[resolveStock] CACHE HIT: "${text}" → ${cached?.ticker}`);
+        return cached;
+    }
 
     const _log = (stage, result) => {
-        console.log(`[resolveStock] input="${text}" → cleaned="${cleaned}" → lower="${lower}" | stage=${stage} → ticker=${result?.ticker}, name=${result?.name}, market=${result?.market}`);
+        console.log(`[resolveStock] input="${text}" → normalized="${normalized}" | stage=${stage} → ticker=${result?.ticker}, name=${result?.name}`);
+        setCache(cacheKey, result);
         return result;
     };
 
-    // 1) KR map exact
-    if (KR_COMPANY_MAP[lower]) {
-        const info = KR_COMPANY_MAP[lower];
-        return _log('KR_EXACT', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
-    }
+    // ════════ 1단계: 정확 일치 (exact match) ════════
 
-    // 2) US map exact
-    if (US_COMPANY_MAP[lower]) {
-        const info = US_COMPANY_MAP[lower];
-        return _log('US_EXACT', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
-    }
-
-    // 2.5) ETF map exact
-    if (ETF_MAP[lower]) {
-        const info = ETF_MAP[lower];
-        return _log('ETF_EXACT', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
-    }
-
-    // 3) Direct US ticker input (e.g. "NVDA", "TSLA", "AAPL")
+    // 1a) Ticker exact match (대문자)
     const upper = cleaned.toUpperCase();
     if (/^[A-Z]{1,5}(\.[A-Z])?$/.test(upper)) {
-        // Check if it's a known ticker in US map
         for (const info of Object.values(US_COMPANY_MAP)) {
-            if (info.ticker === upper) return _log('US_TICKER_KNOWN', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
+            if (info.ticker === upper) return _log('EXACT_TICKER_US', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
         }
-        // Check ETF map
         for (const info of Object.values(ETF_MAP)) {
-            if (info.ticker === upper) return _log('ETF_TICKER_KNOWN', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
+            if (info.ticker === upper) return _log('EXACT_TICKER_ETF', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
         }
-        // Unknown but valid ticker format — assume US
-        return _log('US_TICKER_UNKNOWN', { ticker: upper, name: upper, market: 'US', corpCode: null });
+        // Unknown but valid ticker format
+        return _log('EXACT_TICKER_UNKNOWN', { ticker: upper, name: upper, market: 'US', corpCode: null });
     }
 
-    // 4) KR 6-digit code
+    // 1b) KR map exact
+    if (KR_COMPANY_MAP[lower]) {
+        const info = KR_COMPANY_MAP[lower];
+        return _log('EXACT_KR', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
+    }
+
+    // 1c) US map exact
+    if (US_COMPANY_MAP[lower]) {
+        const info = US_COMPANY_MAP[lower];
+        return _log('EXACT_US', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
+    }
+
+    // 1d) ETF map exact
+    if (ETF_MAP[lower]) {
+        const info = ETF_MAP[lower];
+        return _log('EXACT_ETF', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
+    }
+
+    // 1e) KR 6-digit code
     if (/^\d{6}$/.test(cleaned)) {
         for (const info of Object.values(KR_COMPANY_MAP)) {
-            if (info.ticker === cleaned) return _log('KR_CODE_KNOWN', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
+            if (info.ticker === cleaned) return _log('EXACT_KR_CODE', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
         }
-        return _log('KR_CODE_UNKNOWN', { ticker: cleaned, name: cleaned, market: 'KR', corpCode: null });
+        return _log('EXACT_KR_CODE_UNKNOWN', { ticker: cleaned, name: cleaned, market: 'KR', corpCode: null });
     }
 
-    // 5) Partial match in US map (for compound text like "엔비디아칩")
+    // ════════ 2단계: Alias / 별칭 / 부분 매칭 ════════
+
+    // 2a) Abbreviation map (축약어)
+    if (ABBREVIATION_MAP[normalized]) {
+        const info = ABBREVIATION_MAP[normalized];
+        return _log('ALIAS_ABBREV', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
+    }
+    for (const [abbr, info] of Object.entries(ABBREVIATION_MAP)) {
+        if (normalized.length >= 2 && (normalized.includes(abbr) || abbr.includes(normalized))) {
+            return _log('ALIAS_ABBREV_PARTIAL', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
+        }
+    }
+
+    // 2b) Normalized match against all dictionaries
+    if (US_COMPANY_MAP[normalized]) {
+        const info = US_COMPANY_MAP[normalized];
+        return _log('ALIAS_NORM_US', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
+    }
+    if (KR_COMPANY_MAP[normalized]) {
+        const info = KR_COMPANY_MAP[normalized];
+        return _log('ALIAS_NORM_KR', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
+    }
+    if (ETF_MAP[normalized]) {
+        const info = ETF_MAP[normalized];
+        return _log('ALIAS_NORM_ETF', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null, isETFResult: true });
+    }
+
+    // 2c) Partial match in all maps (for compound text like "엔비디아칩")
     for (const [key, info] of Object.entries(US_COMPANY_MAP)) {
-        if (key.length >= 2 && lower.includes(key)) {
-            return _log('US_PARTIAL', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
+        if (key.length >= 2 && (lower.includes(key) || normalized.includes(key))) {
+            return _log('ALIAS_PARTIAL_US', { ticker: info.ticker, name: info.name, market: 'US', corpCode: null });
         }
     }
-
-    // 6) Partial match in KR map
     for (const [key, info] of Object.entries(KR_COMPANY_MAP)) {
-        if (key.length >= 2 && lower.includes(key)) {
-            return _log('KR_PARTIAL', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
+        if (key.length >= 2 && (lower.includes(key) || normalized.includes(key))) {
+            return _log('ALIAS_PARTIAL_KR', { ticker: info.ticker, name: info.name, market: 'KR', corpCode: info.corpCode });
         }
     }
 
-    console.log(`[resolveStock] ❌ resolve 실패: input="${text}" → cleaned="${cleaned}" → lower="${lower}"`);
+    // ════════ 3단계: Fuzzy match (Levenshtein) ════════
+    const fuzzyResult = fuzzyResolve(normalized.length >= 2 ? normalized : lower);
+    if (fuzzyResult && fuzzyResult.score >= 0.85) {
+        return _log(`FUZZY(${fuzzyResult.score.toFixed(2)})`, fuzzyResult.result);
+    }
+
+    console.log(`[resolveStock] ❌ resolve 실패: input="${text}" → normalized="${normalized}"`);
+    setCache(cacheKey, null);
     return null;
 }
 
 // ──────────────────────────────────────────────────────────
-// FUZZY CLOSEST ALIAS — 매핑 실패 시 유사 종목 제안
+// FUZZY RESOLVE — Levenshtein 기반 최상위 후보 반환
+// ──────────────────────────────────────────────────────────
+function fuzzyResolve(input) {
+    if (!input || input.length < 2) return null;
+
+    const allEntries = [
+        ...Object.entries(US_COMPANY_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
+        ...Object.entries(KR_COMPANY_MAP).map(([k, v]) => ({ key: k, info: v, market: 'KR' })),
+        ...Object.entries(ETF_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
+        ...Object.entries(ABBREVIATION_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
+    ];
+
+    let bestScore = 0;
+    let bestEntry = null;
+
+    for (const entry of allEntries) {
+        if (entry.key.length < 2) continue;
+        const score = similarityScore(input, entry.key);
+        if (score > bestScore) {
+            bestScore = score;
+            bestEntry = entry;
+        }
+    }
+
+    if (bestEntry && bestScore >= 0.65) {
+        return {
+            score: bestScore,
+            result: {
+                ticker: bestEntry.info.ticker,
+                name: bestEntry.info.name,
+                market: bestEntry.market,
+                corpCode: bestEntry.info.corpCode || null,
+                isETFResult: bestEntry.market === 'US' && ETF_MAP[bestEntry.key] ? true : undefined,
+            },
+        };
+    }
+    return null;
+}
+
+// ──────────────────────────────────────────────────────────
+// FUZZY CLOSEST ALIAS — Levenshtein 기반 최근접 후보 반환
 // ──────────────────────────────────────────────────────────
 function findClosestAlias(input) {
-    const lower = (input || '').toLowerCase().replace(/\s/g, '');
-    if (lower.length < 2) return null;
+    const normalized = normalize(input);
+    if (normalized.length < 2) return null;
 
-    // 1) Check abbreviation map first (highest priority)
-    for (const [abbr, info] of Object.entries(ABBREVIATION_MAP)) {
-        if (lower.includes(abbr) || abbr.includes(lower)) {
-            return { ticker: info.ticker, name: info.name, market: 'US' };
-        }
-    }
-
-    const allKeys = [
-        ...Object.keys(US_COMPANY_MAP).map(k => ({ key: k, info: US_COMPANY_MAP[k], market: 'US' })),
-        ...Object.keys(ETF_MAP).map(k => ({ key: k, info: ETF_MAP[k], market: 'US' })),
-        ...Object.keys(KR_COMPANY_MAP).map(k => ({ key: k, info: KR_COMPANY_MAP[k], market: 'KR' })),
-    ];
-    // Find keys that share at least 2 characters with input
-    const candidates = allKeys.filter(({ key }) => {
-        if (key.length < 2) return false;
-        // Check substring overlap
-        for (let i = 0; i <= lower.length - 2; i++) {
-            const sub = lower.substring(i, i + 2);
-            if (key.includes(sub)) return true;
-        }
-        return false;
-    });
-    if (!candidates.length) return null;
-    // Score by overlap length, weighted by ratio of match to input length
-    const scored = candidates.map(c => {
-        let score = 0;
-        for (let len = Math.min(lower.length, c.key.length); len >= 2; len--) {
-            for (let i = 0; i <= lower.length - len; i++) {
-                if (c.key.includes(lower.substring(i, i + len))) { score = Math.max(score, len); break; }
-            }
-            if (score > 0) break;
-        }
-        // Boost score by ratio (prefer matches that cover more of the input)
-        const ratio = score / Math.max(lower.length, 1);
-        return { ...c, score, ratio };
-    }).sort((a, b) => {
-        // Primary: higher ratio; Secondary: higher absolute score
-        if (b.ratio !== a.ratio) return b.ratio - a.ratio;
-        return b.score - a.score;
-    });
-    const best = scored[0];
-    // Require at least 50% of input matched, or minimum 2 characters
-    if (best && (best.ratio >= 0.5 || best.score >= 3)) {
-        return { ticker: best.info.ticker, name: best.info.name, market: best.market };
-    }
+    const result = fuzzyResolve(normalized);
+    if (result) return { ticker: result.result.ticker, name: result.result.name, market: result.result.market };
     return null;
 }
 
@@ -913,56 +1091,86 @@ function parseNumberedFollowup(text) {
 }
 
 /**
- * suggestCandidates(text) — 유사 종목 후보 TOP 5 + confidence 반환
- * tier: HIGH(>=0.8 자동선택) | MED(0.5~0.8 확인질문) | LOW(<0.5 리스트)
+ * suggestCandidates(text) — Levenshtein 기반 유사 종목 후보 TOP 5
+ * tier: HIGH(>=0.75 자동선택) | MED(0.5~0.75 확인질문) | LOW(<0.5 리스트)
  */
 function suggestCandidates(text) {
     const cleaned = (text || '').trim();
-    const lower = cleaned.toLowerCase().replace(/\s/g, '');
 
-    // 1) 정확 매칭
-    const exact = resolveStock(cleaned);
-    if (exact) {
-        return {
-            input: text, resolved: exact, confidence: 1.0, tier: 'HIGH',
-            candidates: [{ ticker: exact.ticker, name: exact.name, market: exact.market, confidence: 1.0 }],
-        };
+    // 캐시 확인
+    const cacheKey = `suggest:${normalize(text)}`;
+    const cached = getCached(cacheKey);
+    if (cached !== null) {
+        console.log(`[suggestCandidates] CACHE HIT: "${text}"`);
+        return cached;
     }
 
-    // 2) fuzzy 스코어링
-    const allKeys = [
-        ...Object.keys(US_COMPANY_MAP).map(k => ({ key: k, info: US_COMPANY_MAP[k], market: 'US' })),
-        ...Object.keys(ETF_MAP).map(k => ({ key: k, info: ETF_MAP[k], market: 'US' })),
-        ...Object.keys(KR_COMPANY_MAP).map(k => ({ key: k, info: KR_COMPANY_MAP[k], market: 'KR' })),
+    // 1) 정확 매칭 (resolveStock이 3단계 엔진 통과)
+    const exact = resolveStock(cleaned);
+    if (exact) {
+        const result = {
+            input: text, resolved: exact, confidence: 1.0, tier: 'HIGH',
+            candidates: [{ ticker: exact.ticker, name: exact.name, market: exact.market, confidence: 1.0, tier: 'HIGH' }],
+        };
+        setCache(cacheKey, result);
+        return result;
+    }
+
+    // 2) Levenshtein fuzzy 스코어링
+    const normalized = normalize(text);
+    if (normalized.length < 2) return { input: text, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
+
+    const allEntries = [
+        ...Object.entries(US_COMPANY_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
+        ...Object.entries(ETF_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
+        ...Object.entries(KR_COMPANY_MAP).map(([k, v]) => ({ key: k, info: v, market: 'KR' })),
+        ...Object.entries(ABBREVIATION_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
     ];
 
-    const scored = allKeys.map(c => {
-        let score = 0;
-        for (let len = Math.min(lower.length, c.key.length); len >= 2; len--) {
-            for (let i = 0; i <= lower.length - len; i++) {
-                if (c.key.includes(lower.substring(i, i + len))) { score = Math.max(score, len); break; }
-            }
-            if (score > 0) break;
-        }
-        return { ...c, score, ratio: score / Math.max(lower.length, 1) };
-    }).filter(c => c.score >= 2)
-      .sort((a, b) => b.ratio !== a.ratio ? b.ratio - a.ratio : b.score - a.score)
-      .slice(0, 5);
+    const scored = allEntries
+        .filter(e => e.key.length >= 2)
+        .map(e => ({ ...e, score: similarityScore(normalized, e.key) }))
+        .filter(e => e.score >= 0.3)
+        .sort((a, b) => b.score - a.score);
 
-    if (!scored.length) return { input: text, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
+    // 중복 ticker 제거
+    const seen = new Set();
+    const unique = scored.filter(e => {
+        if (seen.has(e.info.ticker)) return false;
+        seen.add(e.info.ticker);
+        return true;
+    }).slice(0, 5);
 
-    const best = scored[0];
-    const confidence = Math.min(best.ratio, 1.0);
-    const tier = confidence >= 0.8 ? 'HIGH' : confidence >= 0.5 ? 'MED' : 'LOW';
+    if (!unique.length) {
+        const empty = { input: text, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
+        setCache(cacheKey, empty);
+        return empty;
+    }
 
-    return {
+    const best = unique[0];
+    const confidence = best.score;
+    const tier = confidence >= 0.85 ? 'HIGH' : confidence >= 0.5 ? 'MED' : 'LOW';
+
+    function candidateTier(score) {
+        if (score >= 0.85) return 'HIGH';
+        if (score >= 0.5) return 'MED';
+        return 'LOW';
+    }
+
+    const result = {
         input: text,
         resolved: tier === 'HIGH'
             ? { ticker: best.info.ticker, name: best.info.name, market: best.market, corpCode: best.info.corpCode || null }
             : null,
         confidence, tier,
-        candidates: scored.map(c => ({ ticker: c.info.ticker, name: c.info.name, market: c.market, confidence: Math.min(c.ratio, 1.0) })),
+        candidates: unique.map(c => ({
+            ticker: c.info.ticker, name: c.info.name, market: c.market,
+            confidence: parseFloat(c.score.toFixed(2)),
+            tier: candidateTier(c.score),
+        })),
     };
+    setCache(cacheKey, result);
+    return result;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -1015,9 +1223,9 @@ module.exports = {
     resolveKoreanTicker, resolveUSCompany, resolveStock, resolveComparisonStocks, suggestCandidates,
     resolveSector, toFinnhubKRFormat, isDeepAnalysisRequest,
     hasStockKeyword, hasEarningsKeyword, extractCompanyName,
-    getPeers, getETFPeers, findClosestAlias,
+    getPeers, getETFPeers, findClosestAlias, getCompanyDesc,
     isETF, isLeveragedETF, parsePortfolio, isPortfolioInput,
     isRecommendationKeyword, parseNumberedFollowup,
     KR_COMPANY_MAP, US_COMPANY_MAP, ETF_MAP, SECTOR_MAP, PEER_MAP, ETF_PEER_MAP,
-    STOCK_KEYWORDS, EARNINGS_KEYWORDS, LEVERAGED_ETFS, ABBREVIATION_MAP,
+    STOCK_KEYWORDS, EARNINGS_KEYWORDS, LEVERAGED_ETFS, ABBREVIATION_MAP, COMPANY_DESC,
 };

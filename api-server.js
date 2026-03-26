@@ -52,12 +52,13 @@ const {
     getETFPeers, parsePortfolio, isPortfolioInput,
     isRecommendationKeyword, toFinnhubKRFormat, resolveKoreanTicker,
     findClosestAlias, extractCompanyName, suggestCandidates,
-    resolveComparisonStocks,
+    resolveComparisonStocks, getCompanyDesc,
     SECTOR_MAP
 } = require('./utils/ticker-util');
 const { generateWatchlistBriefing, generateMarketBriefing } = require('./services/briefing_service');
 const { searchTicker } = require('./services/ticker-search');
 const { buildPerformanceReport } = require('./services/recommendation-tracker');
+const { generateRecommendations } = require('./services/recommendation-engine');
 const sessions = require('./services/session');
 const watchlistStore = require('./services/watchlist-store');
 const userSettings = require('./services/user-settings');
@@ -111,12 +112,19 @@ app.post('/api/chat', async (req, res) => {
         let session = sessions.get(chatId) || sessions.create(chatId);
         const messages = [];
 
-        // 추천
+        // 추천 — 데이터 기반 엔진으로 교체
         if (isRecommendationKeyword(text) || text.includes('추천') || text.includes('뭐 사')) {
-            const data = await fetchMarketData();
-            const userStyle = watchlistStore.getStyle(chatId);
-            const report = await analyzeRecommendation(data, useDeep, 'normal', userStyle);
-            messages.push({ type: 'analysis', content: report });
+            try {
+                const recs = await generateRecommendations();
+                messages.push({
+                    type: 'recommendation',
+                    content: '📊 오늘의 추천 종목입니다 (데이터 기반 엄격 필터 적용)',
+                    data: recs,
+                });
+            } catch (err) {
+                console.error('[API /chat] 추천 엔진 실패:', err.message);
+                messages.push({ type: 'text', content: '추천 데이터를 가져오는 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.' });
+            }
             return res.json({ messages });
         }
 
@@ -270,17 +278,67 @@ app.post('/api/chat', async (req, res) => {
         if (hasStockKeyword(text)) {
             const extracted = extractCompanyName(text) || text;
 
-            // 자동 검색 API 호출
+            // ── 1) suggestCandidates — Levenshtein 기반 후보 추천 ──
+            const suggestion = suggestCandidates(extracted);
+
+            // tier=HIGH (≥0.85): 자동 분석 진행
+            if (suggestion.tier === 'HIGH' && suggestion.resolved) {
+                console.log(`[API /chat] suggestCandidates HIGH: "${extracted}" → ${suggestion.resolved.ticker}`);
+                let ticker = suggestion.resolved.ticker;
+                let name = suggestion.resolved.name;
+                let market = suggestion.resolved.market;
+                let corpCode = suggestion.resolved.corpCode || null;
+
+                if (market === 'KR') {
+                    const krInfo = resolveKoreanTicker(ticker);
+                    if (krInfo) { ticker = toFinnhubKRFormat(krInfo.ticker); name = krInfo.name; corpCode = krInfo.corpCode; }
+                    else { ticker = toFinnhubKRFormat(ticker); }
+                }
+
+                const data = await fetchAllStockData(ticker, name, corpCode);
+                data.investmentContext = session.context;
+                const reliability = computeDataReliability(data);
+                if (reliability.tier === 'NO_DATA') {
+                    messages.push({ type: 'text', content: `"${name}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!` });
+                    return res.json({ messages });
+                }
+                if (reliability.tier === 'PARTIAL') {
+                    data._dataWarning = `⚠️ 일부 데이터 미확보 (신뢰도 ${reliability.pct}%). 누락: ${reliability.missing.join(', ')}`;
+                }
+                const report = await (useDeep ? analyzeStock(data, useDeep, 'normal') : analyzeStockCasual(data, useDeep, 'normal'));
+                sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastTickerTime: Date.now() });
+                messages.push({ type: 'analysis', content: report, ticker, name });
+                return res.json({ messages });
+            }
+
+            // tier=MED (0.5~0.85): 후보 선택 UI 반환
+            if (suggestion.tier === 'MED' && suggestion.candidates.length > 0) {
+                console.log(`[API /chat] suggestCandidates MED: "${extracted}" → ${suggestion.candidates.length}개 후보`);
+                messages.push({
+                    type: 'candidates',
+                    content: `입력하신 "${extracted}"에 해당하는 종목을 정확히 찾지 못했습니다.\n혹시 아래 종목 중 하나를 말씀하신 건가요?`,
+                    candidates: suggestion.candidates.slice(0, 3).map(c => ({
+                        ticker: c.ticker,
+                        name: c.name,
+                        market: c.market,
+                        confidence: c.confidence,
+                        tier: c.tier,
+                        desc: getCompanyDesc(c.ticker) || null,
+                    })),
+                });
+                return res.json({ messages });
+            }
+
+            // ── 2) ticker-search API 폴백 (suggest도 LOW인 경우) ──
             let searchResult;
             try {
                 searchResult = await searchTicker(extracted);
             } catch (err) {
                 console.warn('[API /chat] ticker-search 실패:', err.message);
-                searchResult = { found: false, auto: false, ticket: null, candidates: [] };
+                searchResult = { found: false, auto: false, ticker: null, candidates: [] };
             }
 
             if (searchResult.found && searchResult.auto) {
-                // 신뢰도 높음 — 자동 종목 분석
                 console.log(`[API /chat] 자동 검색: "${extracted}" → ${searchResult.ticker}`);
                 const ticker = searchResult.ticker;
                 const name   = searchResult.name || ticker;
@@ -288,12 +346,9 @@ app.post('/api/chat', async (req, res) => {
                 const data = await fetchAllStockData(ticker, name, null);
                 data.investmentContext = session.context;
 
-                // ★ 데이터 신뢰도 검증
                 const reliability = computeDataReliability(data);
                 if (reliability.tier === 'NO_DATA') {
-                    console.warn(`[API /chat] ❌ 자동검색 ${ticker} 데이터 부족 — 분석 거부`);
-                    const noDataMsg = `"${name}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!`;
-                    messages.push({ type: 'text', content: noDataMsg });
+                    messages.push({ type: 'text', content: `"${name}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!` });
                     return res.json({ messages });
                 }
                 if (reliability.tier === 'PARTIAL') {
@@ -321,25 +376,24 @@ app.post('/api/chat', async (req, res) => {
                 return res.json({ messages });
             }
 
-            if (searchResult.found && !searchResult.auto && searchResult.candidates.length > 0) {
-                // 신뢰도 불확실 — 후보 제시
-                const candidateLines = searchResult.candidates
-                    .map(c => `• **${c.ticker}** — ${c.name}`)
-                    .join('\n');
-                const msg = `"${extracted}"\uc5d0 해당하는 종목을 여러 개 찾았어요.\n\n다음 중 어떤 종목인가요?\n\n${candidateLines}\n\n정확한 티커를 입력해 주세요! (예: ${searchResult.candidates[0].ticker} 분석해줘)`;
-                messages.push({ type: 'text', content: msg });
+            // ticker-search에서 후보가 있으면 → candidates로 반환
+            if (searchResult.found && searchResult.candidates.length > 0) {
+                messages.push({
+                    type: 'candidates',
+                    content: `"${extracted}"에 해당하는 종목을 여러 개 찾았어요.\n혹시 아래 종목 중 하나를 말씀하신 건가요?`,
+                    candidates: searchResult.candidates.slice(0, 3).map(c => ({
+                        ticker: c.ticker,
+                        name: c.name,
+                        market: 'US',
+                        confidence: c.confidence,
+                        tier: c.confidence >= 0.85 ? 'HIGH' : c.confidence >= 0.5 ? 'MED' : 'LOW',
+                        desc: getCompanyDesc(c.ticker) || null,
+                    })),
+                });
                 return res.json({ messages });
             }
 
-            // findClosestAlias 하드코딩 fallback
-            const candidate = findClosestAlias(extracted);
-            if (candidate) {
-                const suggestionMsg = `"${extracted}"에 해당하는 종목을 정확히 찾지 못했어요.\n\n혹시 **${candidate.name} (${candidate.ticker})**을 말씀하시는 건가요?\n맞다면 "${candidate.ticker} 분석해줘"라고 다시 입력해 주세요!`;
-                messages.push({ type: 'text', content: suggestionMsg });
-                return res.json({ messages });
-            }
-
-            // 백포: 모두 실패
+            // ── 3) 모두 실패 ──
             const noMatchMsg = `"${extracted}"에 해당하는 종목을 찾지 못했어요.\n\n정확한 티커(예: NVDA, TSLA, 005930)나 종목명(예: 엔비디아, 테슬라, 삼성전자)으로 다시 입력해 주세요!`;
             messages.push({ type: 'text', content: noMatchMsg });
             return res.json({ messages });
@@ -353,6 +407,16 @@ app.post('/api/chat', async (req, res) => {
     } catch (err) {
         console.error('[API /chat]', err.message);
         res.status(500).json({ error: err.message });
+    }
+});
+// ── 추천 API ─────────────────────────────────────────────────────
+app.get('/api/recommendations', async (req, res) => {
+    try {
+        const recs = await generateRecommendations();
+        res.json({ ok: true, ...recs });
+    } catch (err) {
+        console.error('[API /recommendations]', err.message);
+        res.status(500).json({ ok: false, error: err.message });
     }
 });
 

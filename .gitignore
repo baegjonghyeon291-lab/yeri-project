@@ -1,4 +1,5 @@
 node_modules/
 .env
 *.log
-yeri-webapp/
+yeri-webapp/node_modules/
+yeri-webapp/dist/
