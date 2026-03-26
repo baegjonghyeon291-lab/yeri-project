@@ -589,52 +589,26 @@ ${dataSummary}
 • 섹터 분위기
 
 ━━━━━━━━━━━━━━━━━━━━━━
-8️⃣ 매수 전략${ctx.horizon ? ` (${ctx.horizon} 기준)` : ''}
-• 1차 매수 구간: [가격]
-• 2차 매수 구간: [가격]
-• 추세 확인 후 매수 조건: [조건]
-• 현재 접근 방법: [분할 접근 / 관망 / 조건부 접근 중 선택]
+8️⃣ 행동 제안 (현재가 기준 구체적 전략)
+
+아래 3가지를 반드시 명시하세요:
+1. **신규 진입 전략**: (관망 / M차 진입 / 적극 매수 등 명확한 스탠스와 권장 진입가)
+2. **보유자 대응 전략**: (수익 실현 / 홀딩 / 손절 등 상황별 대응 수치)
+3. **반등/추세 전환 여부**: (EMA20 회복, 주요 저항 돌파 등 넥스트 핵심 관전 포인트)
 
 ━━━━━━━━━━━━━━━━━━━━━━
-9️⃣ 매도 전략 (목표가 + 예상 수익률)
-
-현재가를 기준으로 예상 수익률을 반드시 함께 표시하세요:
-• 1차 목표가: [가격] (약 +X%)
-• 2차 목표가: [가격] (약 +X%)
-• 분할 매도 구간: [가격 범위]
-• 손절 기준: [가격] 이탈 시 (약 -X%)
-
-━━━━━━━━━━━━━━━━━━━━━━
-🔟 AI 확률 판단
-
-기술적 지표, 뉴스 흐름, 거시경제를 종합하여 향후 1~3개월 확률을 추정하세요.
-합계는 반드시 100%:
-
-📈 상승 가능성: XX%
-↔️ 횡보 가능성: XX%
-📉 하락 가능성: XX%
-
+9️⃣ AI 확률 판단
+기술적 지표, 뉴스 흐름, 거시경제를 종합하여 향후 1~3개월 확률을 추정 (합계 100%):
+📈 상승 가능성: XX% | ↔️ 횡보 가능성: XX% | 📉 하락 가능성: XX%
 [판단 근거 2줄]
 
 ━━━━━━━━━━━━━━━━━━━━━━
-1️⃣1️⃣ 같은 산업 비교 종목
+🔟 같은 산업 비교 종목
 같은 섹터 / 업종 3~5개 비교 종목 + 각각 한 줄 설명:
 예) 종목A → 설명
 
 ━━━━━━━━━━━━━━━━━━━━━━
-1️⃣2️⃣ 리스크 요인
-• 리스크 1
-• 리스크 2
-• 리스크 3
-
-━━━━━━━━━━━━━━━━━━━━━━
-1️⃣3️⃣ AI 종합 의견
-[3~5줄의 균형 잡힌 판단. 근거 포함]
-현재 전략: [분할 접근 ⭕ / 추격 매수 ❌ 등]
-
-━━━━━━━━━━━━━━━━━━━━━━
-1️⃣4️⃣ 투자 판단 요약 (한 줄 결론)
-
+1️⃣1️⃣ 최종 투자 판단 요약 (한 줄 결론)
 시장 위치 + 전략을 합쳐 단 두 문장으로 요약:
 예) "지금은 강한 저점은 아니지만 업황 회복 기대가 있는 중립 구간으로, 분할 접근 전략이 적절합니다."
 
@@ -862,7 +836,7 @@ ${dataSummary}
 ${t.opener}
 
 📌 **[결론]** ${score.suggestedAction} — ${score.probability}
-  (총점 ${score.total}/40 기반. 명확하게)
+  (기계적인 점수는 제외하고, 현재 상황을 종합한 명확한 한 문장으로 작성하세요. 예: "업황 기대감은 있으나 단기 과열권으로, 신규 진입보다는 관망이 유리한 구간입니다.")
 
 💹 **[현재 가격]**
   - 현재가: ${hasPrice ? `${currency}${Number(data.price.current).toLocaleString()}` : '데이터 부족'}
@@ -871,9 +845,9 @@ ${t.opener}
 
 📊 **[기술적 분석]**
   - RSI(14): ${hasTech ? Number(data.technical.rsi).toFixed(1) + ' → ' + (data.technical.rsiSignal || '') : '데이터 부족'}
-  - EMA20/50: ${data.technical?.ema20 != null ? `${currency}${Number(data.technical.ema20).toFixed(2)} / ${currency}${Number(data.technical.ema50 || 0).toFixed(2)}` : '데이터 부족'}
-  - MACD: ${data.technical?.macd?.trend || '데이터 부족'}
-  - 지지/저항: ${data.supportResist?.support ? `${currency}${data.supportResist.support} / ${currency}${data.supportResist.resistance}` : '데이터 부족'}
+  - 추세 (EMA20/50): ${data.technical?.ema20 != null ? `${currency}${Number(data.technical.ema20).toFixed(2)} / ${currency}${Number(data.technical.ema50 || 0).toFixed(2)}` : '데이터 부족'}
+  - 주요 지지/저항: ${data.supportResist?.support ? `${currency}${data.supportResist.support} / ${currency}${data.supportResist.resistance}` : '데이터 부족'}
+  - 📝 **기술적 해석**: (현재가가 지지선 아래면 "지지선 이탈 상태", 위면 "지지 반등 시도", 저항선 부근이면 "돌파 테스트 중" 등 차트 상황을 아주 명확하고 직관적으로 1~2줄로 요약하세요. 약세/중립/반등 대기 구간을 명확히 구분하세요.)
 
 💼 **[재무 상태]**
 ${finBlock}
@@ -881,18 +855,15 @@ ${finBlock}
 
 📰 **[뉴스 요약]** (${newsAn.total}건 분석됨)
 ${newsBlock}
-  위 뉴스의 투자 영향을 2~3줄로 요약. 없으면 "최신 뉴스 없음" 명시.
+  📝 **영향 해석**: (기사 제목만 나열하지 말고, 위 뉴스들이 현재 주가에 긍정적인지 부정적인지 그 "이유"를 1~2줄로 요약하세요. 뉴스가 없으면 "최신 주요 뉴스 없음" 명시)
 
 ⚠️ **[리스크]** (데이터 기반, 억지 창작 금지)
   리스크 2~3개 구체적으로
 
-👉 **[행동 제안]** (반드시 현재가 기준 구체적 가격/조건 포함)
-  ${score.suggestedAction === '분할매수' || score.suggestedAction === '매수 준비'
-    ? `1차 진입 구간 / 2차 구간 / 손절선을 현재가(${hasPrice ? currency + Number(data.price.current).toLocaleString() : '현재가'}) 기준 수치로 명시. 예: "${hasPrice ? currency + (Number(data.price.current) * 0.97).toFixed(2) : 'xxx'} 지지 시 1차 매수", "${hasPrice ? currency + (Number(data.price.current) * 0.93).toFixed(2) : 'yyy'} 이탈 시 손절"`
-    : score.suggestedAction === '관망'
-    ? `진입 조건 명시. 예: "EMA20(${data.technical?.ema20 != null ? currency + Number(data.technical.ema20).toFixed(2) : 'xxx'}) 돌파 확인 후 진입", "${hasPrice ? currency + Number(data.supportResist?.support || data.price.current * 0.95).toFixed(2) : 'xxx'} 지지 확인 시 관심"`
-    : `매수 금지. 하락 추세 지속 시 ${hasPrice ? currency + (Number(data.price.current) * 0.90).toFixed(2) : 'xxx'} 추가 하락 가능성 존재. 추세 회복(EMA20 회복) 전까지 신규 진입 금지.`}
-  목표가 / 손절선 구체적으로 (${hasPrice ? '현재가 기준 %' : '조건부'})
+👉 **[행동 제안]** (반드시 현재가 기준 구체적 가격/조건 포함시켜 아래 3가지를 명시하세요)
+  1. **신규 진입**: (예: "아직 보수적 접근 권장", 또는 "${hasPrice ? currency + (Number(data.price.current) * 0.95).toFixed(2) : 'xxx'} 부근 1차 진입 고려")
+  2. **보유자 대응**: (예: "${hasPrice ? currency + (Number(data.price.current) * 0.90).toFixed(2) : 'xxx'} 지지 확인 전 비중 확대 금지", 또는 "수익 실현 구간 진입, 차익 실현 고려")
+  3. **반등/추세 전환 조건**: (예: "EMA20 회복 및 거래량 증가 시 재평가", 또는 "${hasPrice ? currency + data.supportResist?.resistance : 'xxx'} 저항선 돌파 여부가 핵심")
 
 ${t.ending}
 
