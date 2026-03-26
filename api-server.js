@@ -129,22 +129,14 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
-        // 섹터 분석
-        const sectorInfo = resolveSector(text);
-        if (sectorInfo || (intent.type === 'sector' && intent.sectorKey)) {
-            const key = sectorInfo
-                ? Object.keys(SECTOR_MAP).find(k => SECTOR_MAP[k].sector === sectorInfo.sector) || 'ai'
-                : intent.sectorKey;
-            const sectorData = await fetchSectorData(SECTOR_MAP[key]);
-            const report = await analyzeSector(sectorData, useDeep, 'normal');
-            messages.push({ type: 'analysis', content: report });
-            return res.json({ messages });
-        }
-
+        // 종목 지정 분석이 최우선 (섹터 오탐지 방지 - 예: "bbai"에 "ai"가 포함되어 섹터로 판단되는 문제 방지)
+        const stockResult = resolveStock(text);
+        
         // 종목 비교 분석 — 비교 키워드가 있을 때만 비교 분기 진입
         const COMPARISON_KEYWORDS = ['vs', 'VS', 'versus', '비교', '차이', '이랑', '랑', '대비', '어느게나아', '뭐가나아', '뭐가좋아', '둘중'];
         const hasComparisonKeyword = COMPARISON_KEYWORDS.some(k => text.replace(/\s/g, '').includes(k));
         const comparisonResult = hasComparisonKeyword ? resolveComparisonStocks(text) : null;
+
         if (comparisonResult) {
             const stocks = comparisonResult;
             let tickerA = stocks.stockA.ticker;
@@ -174,8 +166,7 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
-        // 종목 분석
-        const stockResult = resolveStock(text);
+        // 종목 단일 분석
         if (stockResult) {
             let ticker = stockResult.ticker;
             let name = stockResult.name;
@@ -248,6 +239,20 @@ app.post('/api/chat', async (req, res) => {
             messages.push({ type: 'analysis', content: report, ticker, name });
             return res.json({ messages });
         }
+
+        // 섹터 분석 (종목 매칭이 안 된 경우에만)
+        const sectorInfo = resolveSector(text);
+        if (sectorInfo || (intent.type === 'sector' && intent.sectorKey)) {
+            const key = sectorInfo
+                ? Object.keys(SECTOR_MAP).find(k => SECTOR_MAP[k].sector === sectorInfo.sector) || 'ai'
+                : intent.sectorKey;
+            const sectorData = await fetchSectorData(SECTOR_MAP[key]);
+            const report = await analyzeSector(sectorData, useDeep, 'normal');
+            messages.push({ type: 'analysis', content: report });
+            return res.json({ messages });
+        }
+
+
 
         // 포트폴리오
         if (isPortfolioInput(text)) {
