@@ -169,7 +169,7 @@ function ChatPage({ chatId }) {
           if (m.type === 'recommendation') {
             return { role: 'bot', type: 'recommendation', text: m.content, recData: m.data }
           }
-          return { role: 'bot', type: 'text', text: m.content || '' }
+          return { role: 'bot', type: m.type || 'text', text: m.content || '', expectedQuestions: m.expectedQuestions }
         })
         setMessages(prev => [...prev, ...newMsgs])
       } else if (data.reply) {
@@ -240,15 +240,7 @@ function ChatPage({ chatId }) {
                       ))}
                     </>
                   )}
-                  {m.recData.watchlist?.length > 0 && (
-                    <>
-                      <div className="rec-section-label">🟡 WATCHLIST</div>
-                      {m.recData.watchlist.map((item, j) => (
-                        <RecCard key={`wl-${j}`} item={item} grade="WATCHLIST" onAnalyze={(t) => sendMessage(`${t} 분석해줘`)} />
-                      ))}
-                    </>
-                  )}
-                  {m.recData.strongPicks?.length === 0 && m.recData.watchlist?.length === 0 && (
+                  {m.recData.strongPicks?.length === 0 && (
                     <div className="rec-empty">엄격한 필터 기준을 통과한 추천 종목이 없습니다.</div>
                   )}
                   {m.recData.excluded?.length > 0 && (
@@ -264,6 +256,18 @@ function ChatPage({ chatId }) {
                   {m.recData.meta && (
                     <div className="rec-meta">스캔: {m.recData.meta.scannedCount}종목 | {(m.recData.meta.elapsedMs / 1000).toFixed(1)}초</div>
                   )}
+                </div>
+              )}
+              {m.expectedQuestions && m.expectedQuestions.length > 0 && (
+                <div className="expected-questions-wrap">
+                  <div className="expected-questions-title">💡 더 궁금한 점이 있으신가요?</div>
+                  <div className="expected-questions-list">
+                    {m.expectedQuestions.map((q, j) => (
+                      <button key={j} className="expected-q-btn" onClick={() => sendMessage(q)} disabled={loading}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

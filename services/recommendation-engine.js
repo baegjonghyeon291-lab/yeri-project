@@ -39,210 +39,135 @@ let _recCacheTs = 0;
 const REC_CACHE_TTL = 30 * 60 * 1000; // 30분
 
 // ──────────────────────────────────────────────────────────
-// HARD FILTER — 하나라도 해당하면 NOT_RECOMMENDED
+// 1단계: HARD FILTER — 하나라도 해당하면 즉시 탈락
 // ──────────────────────────────────────────────────────────
 function applyHardFilters(data, score) {
     const reasons = [];
-    const { technical, fundamentals, price } = data;
+    const { fundamentals, price } = data;
     const reliability = computeDataReliability(data);
 
-    // 1) 데이터 신뢰도 < 40%
-    if (reliability.pct < 40) {
-        reasons.push('데이터 신뢰도 극히 낮음 (' + reliability.pct + '%)');
-    }
+    if (reliability.pct < 40) reasons.push(`데이터 훼손 (${reliability.pct}%)`);
 
-    // 2) RSI > 75 (극단적 과열)
-    if (technical?.rsi != null && technical.rsi > 75) {
-        reasons.push(`RSI ${technical.rsi.toFixed(1)} → 극단적 과열`);
-    }
+    // 시가총액 < 1B ($10억 미만)
+    const mcap = fundamentals?.mktCap;
+    if (mcap != null && mcap < 1000000000) reasons.push('소형주 리스크 (시가총액 1B 미만)');
 
-    // 3) ROE < -20% (심각한 자본 훼손)
+    // ROE < -10%
     const roe = fundamentals?.roe ? parseFloat(fundamentals.roe) : null;
-    if (roe != null && roe < -20) {
-        reasons.push(`ROE ${roe.toFixed(1)}% → 심각한 자본 훼손`);
-    }
+    if (roe != null && roe < -10) reasons.push(`자본 훼손 (ROE ${roe.toFixed(1)}%)`);
 
-    // 4) FCF 심각한 음수 (FCF < -revenue * 0.3)
+    // 매출 성장률 < 0% (역성장)
+    const growth = fundamentals?.revenueGrowthYoY ? parseFloat(fundamentals.revenueGrowthYoY) : null;
+    if (growth != null && growth < 0) reasons.push(`역성장 (매출 ${growth.toFixed(1)}%)`);
+
+    // FCF < 0 이고 현금 부족
     const fcf = fundamentals?.freeCashFlow;
-    const revenue = fundamentals?.revenue;
-    if (fcf != null && revenue != null && revenue > 0 && fcf < -(revenue * 0.3)) {
-        reasons.push('FCF 심각한 적자 (매출 대비 -30% 이상)');
-    }
-
-    // 5) 52주 고점 대비 -60% 이상 붕괴
-    const current = price?.current;
-    const high52 = price?.fifty2High;
-    if (current != null && high52 != null && high52 > 0) {
-        const dropPct = ((current - high52) / high52) * 100;
-        if (dropPct < -60) {
-            reasons.push(`52주 고점 대비 ${dropPct.toFixed(0)}% 붕괴`);
+    const cash = fundamentals?.totalCash;
+    const debt = fundamentals?.totalDebt;
+    if (fcf != null && fcf < 0) {
+        if (cash != null && debt != null && cash < debt) {
+            reasons.push('현금 고갈 우려 (적자 전환 + 부채 과다)');
         }
     }
 
-    // 6) 매출 성장률 < -30%
-    const growth = fundamentals?.revenueGrowthYoY ? parseFloat(fundamentals.revenueGrowthYoY) : null;
-    if (growth != null && growth < -30) {
-        reasons.push(`매출 역성장 ${growth.toFixed(1)}%`);
-    }
-
-    return {
-        rejected: reasons.length > 0,
-        reasons,
-    };
+    return { rejected: reasons.length > 0, reasons };
 }
 
 // ──────────────────────────────────────────────────────────
-// BONUS SCORE — 추천 보조 점수 (0~10)
+// 2단계: SCORE FILTER — 마진, FCF, 부채비율, 성장성, 거래량 (최대 15점)
 // ──────────────────────────────────────────────────────────
 function computeBonusScore(data) {
-    const { technical, price, news } = data;
-    const reliability = computeDataReliability(data);
+    const { technical, fundamentals, price } = data;
     const detail = [];
     let total = 0;
 
-    // 1) EMA20 위치 (0~2)
-    const current = price?.current;
+    // 1. 매출 성장률 (0~3)
+    const growth = fundamentals?.revenueGrowthYoY ? parseFloat(fundamentals.revenueGrowthYoY) : null;
+    if (growth != null) {
+        if (growth > 30) { total += 3; detail.push('초고성장(>30%) +3점'); }
+        else if (growth > 15) { total += 2; detail.push('고성장(>15%) +2점'); }
+        else if (growth > 0) { total += 1; detail.push('안정적성장(>0%) +1점'); }
+        else { detail.push('역성장 0점'); }
+    } else { detail.push('성장률 없음 0점'); }
+
+    // 2. 마진 (순이익률) (0~3)
+    const margin = fundamentals?.netMargin ? parseFloat(fundamentals.netMargin) : null;
+    if (margin != null) {
+        if (margin > 20) { total += 3; detail.push('초고수익성(>20%) +3점'); }
+        else if (margin > 10) { total += 2; detail.push('고수익성(>10%) +2점'); }
+        else if (margin > 0) { total += 1; detail.push('수익성(>0%) +1점'); }
+        else { detail.push('적자(마진) 0점'); }
+    } else { detail.push('마진 없음 0점'); }
+
+    // 3. FCF (0~3)
+    const fcf = fundamentals?.freeCashFlow;
+    const rev = fundamentals?.revenue;
+    if (fcf != null && rev != null && rev > 0) {
+        const fcfMargin = (fcf / rev) * 100;
+        if (fcfMargin > 15) { total += 3; detail.push('풍부한FCF(>15%) +3점'); }
+        else if (fcfMargin > 5) { total += 2; detail.push('안정적FCF(>5%) +2점'); }
+        else if (fcfMargin > 0) { total += 1; detail.push('흑자FCF +1점'); }
+        else { detail.push('적자FCF 0점'); }
+    } else { detail.push('FCF 없음 0점'); }
+
+    // 4. 부채비율 (Debt to Equity) (0~3)
+    const dte = fundamentals?.debtToEquity ? parseFloat(fundamentals.debtToEquity) : null;
+    if (dte != null) {
+        if (dte < 50) { total += 3; detail.push('우량재무(Debt<50%) +3점'); }
+        else if (dte < 100) { total += 2; detail.push('건전재무(Debt<100%) +2점'); }
+        else if (dte < 200) { total += 1; detail.push('보통재무(Debt<200%) +1점'); }
+        else { detail.push('위험재무 0점'); }
+    } else { detail.push('부채비율 없음 0점'); }
+
+    // 5. 상승 추세 (가격 > EMA20 장기 유지 및 거래량 지지) (0~3)
+    const cur = price?.current;
     const ema20 = technical?.ema20;
-    if (current != null && ema20 != null && ema20 > 0) {
-        const ratio = current / ema20;
-        if (ratio >= 1.0) {
-            total += 2; detail.push('EMA20 위 유지 (2/2)');
-        } else if (ratio >= 0.97) {
-            total += 1; detail.push('EMA20 근접 (1/2)');
+    const vol = price?.volume;
+    const avgVol = price?.avgVolume;
+    if (cur != null && ema20 != null && cur > ema20) {
+        if (vol && avgVol && vol > avgVol * 1.2) {
+            total += 3; detail.push('강한상승추세(거래량수반) +3점');
         } else {
-            detail.push('EMA20 하회 (0/2)');
+            total += 2; detail.push('상승추세(EMA20↑) +2점');
         }
-    } else {
-        detail.push('EMA20: 데이터 없음');
-    }
-
-    // 2) 52주 위치 (0~2)
-    const high52 = price?.fifty2High;
-    const low52 = price?.fifty2Low;
-    if (current != null && high52 != null && low52 != null && high52 > low52) {
-        const range = high52 - low52;
-        const position = (current - low52) / range; // 0=저점, 1=고점
-        if (position >= 0.2 && position <= 0.65) {
-            total += 2; detail.push(`52주 위치 ${(position * 100).toFixed(0)}% → 적정 구간 (2/2)`);
-        } else if (position > 0.65 && position <= 0.85) {
-            total += 1; detail.push(`52주 위치 ${(position * 100).toFixed(0)}% → 고점 근접 (1/2)`);
-        } else if (position < 0.2) {
-            total += 1; detail.push(`52주 위치 ${(position * 100).toFixed(0)}% → 저점 근접 (1/2)`);
-        } else {
-            detail.push(`52주 위치 ${(position * 100).toFixed(0)}% → 신고가 구간 (0/2)`);
-        }
-    } else {
-        detail.push('52주 범위: 데이터 없음');
-    }
-
-    // 3) 뉴스 감성 (0~2) — 간이 키워드 분석
-    const newsItems = news || [];
-    if (newsItems.length > 0) {
-        const negKeywords = ['crash', 'plunge', 'fraud', 'lawsuit', 'downgrade', 'loss', 'decline', 'fall', 'warn', 'risk', 'miss', 'cut', 'layoff', '하락', '급락', '소송', '적자', '위기'];
-        const posKeywords = ['surge', 'beat', 'record', 'growth', 'upgrade', 'raise', 'strong', 'profit', 'gain', 'rally', '상승', '신고가', '성장', '흑자'];
-        let pos = 0, neg = 0;
-        newsItems.forEach(n => {
-            const title = (n.title || '').toLowerCase();
-            if (posKeywords.some(k => title.includes(k))) pos++;
-            if (negKeywords.some(k => title.includes(k))) neg++;
-        });
-        if (pos > neg + 1) {
-            total += 2; detail.push(`뉴스 긍정 우세 (${pos}긍정/${neg}부정) (2/2)`);
-        } else if (neg > pos + 1) {
-            detail.push(`뉴스 부정 우세 (${pos}긍정/${neg}부정) (0/2)`);
-        } else {
-            total += 1; detail.push(`뉴스 중립 (${pos}긍정/${neg}부정) (1/2)`);
-        }
-    } else {
-        total += 1; detail.push('뉴스 데이터 없음 → 중립 처리 (1/2)');
-    }
-
-    // 4) 거래량 (0~2) — volume vs avgVolume
-    const volume = price?.volume;
-    const avgVolume = price?.avgVolume;
-    if (volume != null && avgVolume != null && avgVolume > 0) {
-        const volRatio = volume / avgVolume;
-        if (volRatio >= 0.7) {
-            total += 2; detail.push(`거래량 정상 (${(volRatio * 100).toFixed(0)}%) (2/2)`);
-        } else if (volRatio >= 0.3) {
-            total += 1; detail.push(`거래량 약간 부족 (${(volRatio * 100).toFixed(0)}%) (1/2)`);
-        } else {
-            detail.push(`거래량 극히 부족 (${(volRatio * 100).toFixed(0)}%) (0/2)`);
-        }
-    } else {
-        total += 1; detail.push('거래량 데이터 없음 → 중립 (1/2)');
-    }
-
-    // 5) 데이터 신뢰도 (0~2)
-    if (reliability.pct >= 80) {
-        total += 2; detail.push(`데이터 신뢰도 ${reliability.pct}% (2/2)`);
-    } else if (reliability.pct >= 50) {
-        total += 1; detail.push(`데이터 신뢰도 ${reliability.pct}% (1/2)`);
-    } else {
-        detail.push(`데이터 신뢰도 ${reliability.pct}% (0/2)`);
-    }
+    } else if (cur != null && ema20 != null && cur > ema20 * 0.95) {
+        total += 1; detail.push('보합추세 +1점');
+    } else { detail.push('하락추세 0점'); }
 
     return { total, detail };
 }
 
 // ──────────────────────────────────────────────────────────
-// COMPUTE RECOMMENDATION SCORE — 단일 종목 종합 추천 평가
+// 3단계: COMPUTE RECOMMENDATION SCORE — 종합 등급 (STRONG_PICK 전용)
 // ──────────────────────────────────────────────────────────
 function computeRecommendationScore(data) {
-    const base = computeScore(data);
-    const bonus = computeBonusScore(data);
-    const hard = applyHardFilters(data, base);
+    const hard = applyHardFilters(data);
+    const scoreFilter = computeBonusScore(data);
+    const totalScore = scoreFilter.total; // 0 ~ 15
 
-    const baseScore = base.normalized ?? 0;
-    const bonusScore = bonus.total;
-    const totalScore = baseScore + bonusScore;
+    let grade = 'NOT_RECOMMENDED';
+    let reason = '';
 
-    // 등급 결정
-    let grade;
-    if (hard.rejected) {
-        grade = 'NOT_RECOMMENDED';
-    } else if (totalScore >= 14) {
-        grade = 'STRONG_PICK';
-    } else if (totalScore >= 9) {
-        grade = 'WATCHLIST';
-    } else {
-        grade = 'NOT_RECOMMENDED';
-    }
-
-    // 이유 자동 생성 (데이터 기반 1~3줄)
-    let reason;
     if (hard.rejected) {
         reason = hard.reasons.join(', ');
     } else {
-        const positives = [];
-        const negatives = [];
-        if (base.rsiScore >= 1) positives.push('RSI 적정');
-        if (base.roeScore >= 1) positives.push('ROE 양호');
-        if (base.fcfScore >= 1) positives.push('현금흐름 안정');
-        if (base.growthScore >= 2) positives.push('고성장');
-        if (base.perScore >= 1) positives.push('밸류에이션 적정');
-        if (base.rsiScore === 0 && base.rsiScore !== null) negatives.push('RSI 과열');
-        if (base.growthScore === 0 && base.growthScore !== null) negatives.push('역성장');
-        if (base.fcfScore === 0 && base.fcfScore !== null) negatives.push('FCF 음수');
-
-        if (positives.length > 0 && negatives.length > 0) {
-            reason = `${positives.join(', ')} / 주의: ${negatives.join(', ')}`;
-        } else if (positives.length > 0) {
-            reason = positives.join(', ');
-        } else if (negatives.length > 0) {
-            reason = `주의: ${negatives.join(', ')}`;
+        // STRONG_PICK 조건: 총점 11점 이상이면서 핵심 필터 흑자 조건 만족 시
+        if (totalScore >= 10) {
+            grade = 'STRONG_PICK';
+            const f = data.fundamentals || {};
+            const roe = f.roe ? parseFloat(f.roe).toFixed(1) : '';
+            const g = f.revenueGrowthYoY ? parseFloat(f.revenueGrowthYoY).toFixed(1) : '';
+            reason = `고성장(${g}%) + 튼튼한 수익성(ROE ${roe}%) + 안정적 수급 구조`;
         } else {
-            reason = '데이터 기반 종합 평가';
+            reason = '수익성은 양호하나 성장/추세 모멘텀 다소 부족';
         }
     }
 
     return {
-        baseScore, bonusScore, totalScore, grade, reason,
+        totalScore, grade, reason,
         hardReject: hard.rejected,
         rejectReasons: hard.reasons,
-        baseDetail: base.detail,
-        bonusDetail: bonus.detail,
-        verdict: base.verdict,
+        bonusDetail: scoreFilter.detail,
     };
 }
 
@@ -286,30 +211,26 @@ async function generateRecommendations() {
         results.push(...batchResults.filter(Boolean));
     }
 
-    // 등급별 분류 + 정렬
+    // 최종 3단계: STRONG_PICK만 최대 3개 선별
     const strongPicks = results
         .filter(r => r.grade === 'STRONG_PICK')
         .sort((a, b) => b.totalScore - a.totalScore)
         .slice(0, 3);
 
-    const watchlist = results
-        .filter(r => r.grade === 'WATCHLIST')
-        .sort((a, b) => b.totalScore - a.totalScore)
-        .slice(0, 5);
-
     const excluded = results
-        .filter(r => r.grade === 'NOT_RECOMMENDED' && r.hardReject)
-        .sort((a, b) => a.totalScore - b.totalScore)
-        .slice(0, 5);
+        .filter(r => r.grade === 'NOT_RECOMMENDED')
+        .sort((a, b) => b.totalScore - a.totalScore); // 점수순 정렬(상대적으로 아쉬운 건 위로)
 
     const output = {
         strongPicks: strongPicks.map(formatResult),
-        watchlist: watchlist.map(formatResult),
+        watchlist: [], // UI에서 더이상 WATCHLIST를 취급하지 않으므로 비워둠
         excluded: excluded.map(r => ({
             ticker: r.ticker,
             name: r.name,
             desc: r.desc,
             reason: r.reason,
+            totalScore: r.totalScore,
+            bonusDetail: r.bonusDetail
         })),
         meta: {
             scannedCount: results.length,
@@ -321,7 +242,7 @@ async function generateRecommendations() {
     // 캐시 저장
     _recCache = output;
     _recCacheTs = Date.now();
-    console.log(`[RecEngine] 스캔 완료: ${strongPicks.length} STRONG + ${watchlist.length} WATCH + ${excluded.length} EXCLUDED (${output.meta.elapsedMs}ms)`);
+    console.log(`[RecEngine] 스캔 완료: ${strongPicks.length} STRONG + ${excluded.length} EXCLUDED (${output.meta.elapsedMs}ms)`);
 
     return output;
 }
@@ -334,12 +255,10 @@ function formatResult(r) {
         price: r.price,
         changePct: r.changePct,
         totalScore: r.totalScore,
-        baseScore: r.baseScore,
-        bonusScore: r.bonusScore,
+        bonusDetail: r.bonusDetail,
         grade: r.grade,
-        confidence: r.totalScore >= 16 ? 'HIGH' : r.totalScore >= 12 ? 'MED' : 'LOW',
+        confidence: r.totalScore >= 12 ? 'HIGH' : r.totalScore >= 10 ? 'MED' : 'LOW',
         reason: r.reason,
-        verdict: r.verdict,
     };
 }
 

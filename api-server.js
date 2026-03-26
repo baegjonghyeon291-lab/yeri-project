@@ -248,7 +248,13 @@ app.post('/api/chat', async (req, res) => {
                 lastAnalyzedMarket: market, lastTickerTime: Date.now(),
             });
 
-            messages.push({ type: 'analysis', content: report, ticker, name });
+            const expectedQuestions = [
+                `${name || ticker} 최근 뉴스 요약해줘`,
+                `${name || ticker} 실적 전망 살펴보기`,
+                `${name || ticker} 경쟁사와 비교해줘`
+            ];
+
+            messages.push({ type: 'analysis', content: report, ticker, name, expectedQuestions });
             return res.json({ messages });
         }
 
