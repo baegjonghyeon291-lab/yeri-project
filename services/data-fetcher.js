@@ -59,18 +59,18 @@ async function safeGet(label, fn) {
     const t0 = Date.now();
     try {
         const r = await fn();
-        const ok = r !== null && r !== undefined;
+        const ok = r !== null && r !== undefined && r !== false;
         recordStat(label, ok, Date.now() - t0);
-        if (ok) console.log(`[\u2705 ${label}] OK`);
-        return r;
+        if (ok) {
+            console.log(`[${label}] success`);
+            return r;
+        } else {
+            console.log(`[${label}] fail (no data)`);
+            return null;
+        }
     } catch (e) {
-        const status = e.response?.status;
         recordStat(label, false, Date.now() - t0);
-        const reason = status === 403 ? 'invalid key/plan'
-            : status === 429 ? 'rate limited'
-            : status === 404 ? 'not found'
-            : (e.code || e.message?.slice(0, 60));
-        console.warn(`[\u26a0\ufe0f  ${label}] Failed (${reason})`);
+        console.log(`[${label}] fail (error)`);
         return null;
     }
 }
@@ -79,11 +79,15 @@ async function safeGet(label, fn) {
 // Fallback runner — sources 순서대로 시도
 // ─────────────────────────────────────────────
 async function withFallback(label, sources) {
-    for (const [name, fn] of sources) {
-        const result = await safeGet(`${label}/${name}`, fn);
-        if (result !== null && result !== undefined) return result;
+    for (let i = 0; i < sources.length; i++) {
+        const [name, fn] = sources[i];
+        const result = await safeGet(name, fn);
+        if (result !== null && result !== undefined) {
+             if (i > 0) console.log(`[${name}] fallback used for ${label}`);
+             return result;
+        }
     }
-    console.warn(`[\u274c ${label}] All sources failed`);
+    console.warn(`[${label}] All sources failed`);
     return null;
 }
 
@@ -335,8 +339,39 @@ async function getFundamentals(ticker) {
     if (cached) return cached;
 
     const data = await withFallback('Fundamentals', [
-        // 1순위: Yahoo Finance (FCF/Revenue/NetIncome/ROE 등 핵심 재무 안정 제공)
-        ['Yahoo/yahoo-finance2', () => yahoo.getYahooFundamentals(ticker)],
+        // 1순위: FMP (가장 근본적이고 정확한 재무 데이터 API)
+        ['FMP', async () => {
+            const key = process.env.FMP_API_KEY;
+            if (!key) return null;
+            const res = await axios.get(`https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${key}`, { timeout: 8000 }).catch(() => null);
+            const metricsRes = await axios.get(`https://financialmodelingprep.com/api/v3/key-metrics-ttm/${ticker}?apikey=${key}`, { timeout: 8000 }).catch(() => null);
+            const quoteRes = await axios.get(`https://financialmodelingprep.com/api/v3/quote/${ticker}?apikey=${key}`, { timeout: 8000 }).catch(() => null);
+            
+            const p = res?.data?.[0];
+            const m = metricsRes?.data?.[0];
+            const q = quoteRes?.data?.[0];
+            if (!p && !m && !q) return null;
+
+            return {
+                companyName: p?.companyName,
+                sector: p?.sector,
+                industry: p?.industry,
+                mktCap: p?.mktCap || q?.marketCap,
+                beta: p?.beta ? parseFloat(p.beta).toFixed(2) : null,
+                peRatio: q?.pe ? parseFloat(q.pe).toFixed(2) : (m?.peRatioTTM ? parseFloat(m.peRatioTTM).toFixed(2) : null),
+                eps: q?.eps ? parseFloat(q.eps).toFixed(2) : null,
+                forwardPE: null,
+                pbRatio: m?.pbRatioTTM ? parseFloat(m.pbRatioTTM).toFixed(2) : null,
+                debtToEquity: m?.debtToEquityTTM ? parseFloat(m.debtToEquityTTM).toFixed(2) : null,
+                netMargin: null,
+                roe: m?.roeTTM ? (parseFloat(m.roeTTM) * 100).toFixed(1) + '%' : null,
+                revenueGrowthYoY: null,
+                revenue: null,
+                grossProfit: null,
+                nextEarningsDate: q?.earningsAnnouncement,
+                source: 'FMP'
+            };
+        }],
 
         // 2순위: Finnhub (글로벌 주식 재무 지표)
         ['Finnhub', async () => {
@@ -409,8 +444,20 @@ async function getFundamentals(ticker) {
 
 async function getNews(query, ticker = null) {
     const results = await Promise.allSettled([
-        // NewsAPI
-        safeGet('News/NewsAPI', async () => {
+        // 1. Finnhub
+        safeGet('Finnhub', async () => {
+            const key = process.env.FINNHUB_API_KEY;
+            if (!key || !ticker) return [];
+            const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+            const to = new Date().toISOString().slice(0, 10);
+            const res = await axios.get(`https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${key}`, { timeout: 8000 });
+            return (res.data || []).slice(0, 5).map(a => ({
+                title: a.headline, description: a.summary,
+                source: a.source, publishedAt: new Date(a.datetime * 1000).toISOString().slice(0, 10), url: a.url
+            }));
+        }),
+        // 2. NewsAPI
+        safeGet('NewsAPI', async () => {
             const key = process.env.NEWS_API_KEY;
             if (!key) return [];
             const res = await axios.get('https://newsapi.org/v2/everything', {
@@ -421,18 +468,6 @@ async function getNews(query, ticker = null) {
             return (res.data.articles || []).map(a => ({
                 title: a.title, description: a.description,
                 source: a.source?.name, publishedAt: a.publishedAt?.slice(0, 10), url: a.url
-            }));
-        }),
-        // Finnhub
-        safeGet('News/Finnhub', async () => {
-            const key = process.env.FINNHUB_API_KEY;
-            if (!key || !ticker) return [];
-            const from = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-            const to = new Date().toISOString().slice(0, 10);
-            const res = await axios.get(`https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${from}&to=${to}&token=${key}`, { timeout: 8000 });
-            return (res.data || []).slice(0, 5).map(a => ({
-                title: a.headline, description: a.summary,
-                source: a.source, publishedAt: new Date(a.datetime * 1000).toISOString().slice(0, 10), url: a.url
             }));
         })
     ]);
@@ -706,6 +741,21 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         };
     }
 
+    // ── 신뢰도 계산 및 메타데이터 주입 ──
+    const rely = computeDataReliability({ price, technical, fundamentals, news, macro });
+    const metadata = {
+        sources: {
+            price: price?.source || '없음',
+            technical: technical?.source || '없음',
+            fundamentals: fundamentals?.source || '없음',
+            news: news?.length ? news[0]?.source || 'Finnhub/NewsAPI' : '없음',
+            macro: macro?.source || '없음'
+        },
+        confidence: rely.label,
+        reason: rely.reason,
+        tier: rely.tier
+    };
+
     // ── 검증 로그 (디버그/감사용) ──────────────────────────────
     const vLog = [
         `\n${'═'.repeat(50)}`,
@@ -719,12 +769,13 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         `[검증로그] analyst:          ${analystRatings?.source || 'none'} | target: ${analystRatings?.consensus?.targetMean ?? 'N/A'}`,
         `[검증로그] support/resist:   ${supportResist ? `S:${supportResist.support} R:${supportResist.resistance}` : 'N/A'}`,
         `[검증로그] 52w high/low:     ${price?.fifty2High ?? 'N/A'} / ${price?.fifty2Low ?? 'N/A'}`,
+        `[검증로그] 💡 Confidence:    ${metadata.confidence} (${metadata.tier})`,
         `${'─'.repeat(50)}`,
         `[DataFetcher] ✅ Pipeline complete for: ${ticker}`,
     ];
     console.log(vLog.join('\n'));
 
-    return { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist };
+    return { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist, metadata };
 }
 
 async function fetchMarketData() {
@@ -749,65 +800,49 @@ async function fetchSectorData(sectorInfo) {
 // 데이터 신뢰도 산출 시스템 — FULL / PARTIAL / NO_DATA
 // ═══════════════════════════════════════════════════════
 function computeDataReliability(data) {
-    const checks = {
-        price:        { weight: 30, ok: data.price?.current != null },
-        technical:    { weight: 25, ok: data.technical?.rsi != null },
-        fundamentals: { weight: 20, ok: data.fundamentals?.peRatio != null || data.fundamentals?.revenue != null },
-        news:         { weight: 15, ok: (data.news?.length || 0) >= 1 },
-        macro:        { weight: 10, ok: data.macro?.vix != null },
-    };
+    const hasPrice = data.price?.current != null;
+    const hasTech = data.technical?.rsi != null;
+    const hasFund = data.fundamentals?.peRatio != null || data.fundamentals?.revenue != null;
 
-    let totalWeight = 0;
-    let earnedWeight = 0;
-    const available = [];
-    const missing = [];
+    let reliability, label, emoji, reason;
 
-    for (const [key, { weight, ok }] of Object.entries(checks)) {
-        totalWeight += weight;
-        if (ok) {
-            earnedWeight += weight;
-            available.push(key);
-        } else {
-            missing.push(key);
-        }
-    }
-
-    const pct = totalWeight > 0 ? (earnedWeight / totalWeight) * 100 : 0;
-
-    // 등급 결정
-    let tier, label, emoji;
-    if (!checks.price.ok) {
-        // 가격 데이터조차 없으면 무조건 NO_DATA
-        tier = 'NO_DATA';
-        label = '분석 불가';
+    if (!hasPrice) {
+        reliability = 'FAIL';
+        label = '실패';
         emoji = '🔴';
-    } else if (pct >= 80) {
-        tier = 'FULL';
-        label = '전체 분석 가능';
+        reason = '가격도 없음 → 분석 자체 중단';
+    } else if (hasTech && hasFund) {
+        reliability = 'HIGH';
+        label = '높음';
         emoji = '🟢';
-    } else {
-        // 가격 데이터만 있다면 최소한 부분 분석(PARTIAL)은 보장
-        tier = 'PARTIAL';
-        label = '부분 분석 가능';
+        reason = '가격 + 기술 + 재무 모두 존재';
+    } else if (hasTech) {
+        reliability = 'MEDIUM';
+        label = '중간';
         emoji = '🟡';
+        reason = '가격 + 기술만 존재';
+    } else {
+        reliability = 'LOW';
+        label = '낮음';
+        emoji = '🟠';
+        reason = '가격만 존재';
     }
 
-    const reliability = pct >= 80 ? 'HIGH' : pct >= 50 ? 'MEDIUM' : 'LOW';
+    const missing = [!hasPrice && '가격', !hasTech && '기술', !hasFund && '재무'].filter(Boolean);
+    const available = [hasPrice && '가격', hasTech && '기술', hasFund && '재무'].filter(Boolean);
 
     const summary = {
-        tier,         // FULL | PARTIAL | NO_DATA
-        reliability,  // HIGH | MEDIUM | LOW
+        tier: reliability === 'FAIL' ? 'NO_DATA' : (reliability === 'HIGH' ? 'FULL' : 'PARTIAL'),
+        reliability,
         label,
         emoji,
-        pct: Math.round(pct),
-        available,
+        reason,
+        pct: reliability === 'HIGH' ? 100 : reliability === 'MEDIUM' ? 66 : reliability === 'LOW' ? 33 : 0,
         missing,
-        detail: Object.fromEntries(
-            Object.entries(checks).map(([k, v]) => [k, { loaded: v.ok, weight: v.weight }])
-        ),
+        available
     };
 
-    console.log(`[DataReliability] ${emoji} ${tier} (${summary.pct}%) — 신뢰도: ${reliability}`);
+    console.log(`[DataReliability] ${emoji} ${summary.tier} (${summary.pct}%) — 신뢰도: ${reliability}`);
     console.log(`[DataReliability] ✅ 확보: ${available.join(', ') || 'none'}`);
     if (missing.length) console.log(`[DataReliability] ❌ 미확보: ${missing.join(', ')}`);
 

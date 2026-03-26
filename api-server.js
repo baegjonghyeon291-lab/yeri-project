@@ -141,10 +141,7 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
-        // 종목 지정 분석이 최우선 (섹터 오탐지 방지 - 예: "bbai"에 "ai"가 포함되어 섹터로 판단되는 문제 방지)
-        const stockResult = resolveStock(text);
-        
-        // 종목 비교 분석 — 비교 키워드가 있을 때만 비교 분기 진입
+        // 1. 종목 비교 분석
         const COMPARISON_KEYWORDS = ['vs', 'VS', 'versus', '비교', '차이', '이랑', '랑', '대비', '어느게나아', '뭐가나아', '뭐가좋아', '둘중'];
         const hasComparisonKeyword = COMPARISON_KEYWORDS.some(k => text.replace(/\s/g, '').includes(k));
         const comparisonResult = hasComparisonKeyword ? resolveComparisonStocks(text) : null;
@@ -156,7 +153,6 @@ app.post('/api/chat', async (req, res) => {
             let tickerB = stocks.stockB.ticker;
             let nameB = stocks.stockB.name;
 
-            // 한국 종목 처리
             if (stocks.stockA.market === 'KR') {
                 const krA = resolveKoreanTicker(tickerA);
                 if (krA) { tickerA = toFinnhubKRFormat(krA.ticker); nameA = krA.name; }
@@ -178,27 +174,25 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
-        // 종목 단일 분석
-        if (stockResult) {
-            let ticker = stockResult.ticker;
-            let name = stockResult.name;
-            let market = stockResult.market;
-            let corpCode = stockResult.corpCode || null;
+        // 2. 단일 종목 (Ticker Engine: normalize -> exact -> alias -> fuzzy)
+        const extracted = extractCompanyName(text) || text.trim();
+        const suggestion = suggestCandidates(extracted);
+        const isStockIntent = hasStockKeyword(text) || (text.length <= 15 && !text.includes('안녕') && !text.includes('고마워'));
 
-            console.log(`[API /chat] ▶ resolve 결과: input="${text}" → ticker=${ticker}, name=${name}, market=${market}`);
+        // HIGH: 올바른 점수(0.85 이상) 이거나 정확히 일치 -> 바로 분석 수행
+        if (suggestion.tier === 'HIGH' && suggestion.resolved) {
+            let ticker = suggestion.resolved.ticker;
+            let name = suggestion.resolved.name;
+            let market = suggestion.resolved.market;
+            let corpCode = suggestion.resolved.corpCode || null;
 
+            console.log(`[API /chat] ▶ resolve 결과 (HIGH): input="${text}" → ticker=${ticker}, name=${name}, market=${market}`);
             if (market === 'KR') {
                 const krInfo = resolveKoreanTicker(ticker);
-                if (krInfo) {
-                    ticker = toFinnhubKRFormat(krInfo.ticker);
-                    name = krInfo.name;
-                    corpCode = krInfo.corpCode;
-                } else {
-                    ticker = toFinnhubKRFormat(ticker);
-                }
+                if (krInfo) { ticker = toFinnhubKRFormat(krInfo.ticker); name = krInfo.name; corpCode = krInfo.corpCode; }
+                else { ticker = toFinnhubKRFormat(ticker); }
             }
 
-            // intent 결정 — compare_stocks는 단일 종목 분기에서 무시
             let stockIntent = 'full_analysis';
             if (hasEarningsKeyword(text)) stockIntent = 'earnings_check';
             else if (isETF(ticker)) stockIntent = 'etf_analysis';
@@ -207,20 +201,13 @@ app.post('/api/chat', async (req, res) => {
             const data = await fetchAllStockData(ticker, name, corpCode);
             data.investmentContext = session.context;
 
-            // ★ 데이터 신뢰도 검증 — 가격조차 없으면 분석 불가 응답
             const reliability = computeDataReliability(data);
             if (reliability.tier === 'NO_DATA') {
                 console.warn(`[API /chat] ❌ ${ticker} 데이터 부족 (${reliability.pct}%) — 분석 거부`);
-                const noDataMsg = `"${name || ticker}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n` +
-                    `가능한 원인:\n` +
-                    `• 거래 시간 외이거나 데이터 제공사에서 해당 종목을 지원하지 않을 수 있어요\n` +
-                    `• 소형주/신규 상장 종목은 데이터가 제한적일 수 있어요\n\n` +
-                    `정확한 분석을 위해 잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!`;
-                messages.push({ type: 'text', content: noDataMsg });
+                messages.push({ type: 'text', content: `"${name || ticker}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n잠시 후 다시 시도하거나 티커를 확인해 주세요!` });
                 return res.json({ messages });
             }
 
-            // PARTIAL 데이터일 때도 경고를 data에 포함
             if (reliability.tier === 'PARTIAL') {
                 data._dataWarning = `⚠️ 일부 데이터 미확보 (신뢰도 ${reliability.pct}%). 누락: ${reliability.missing.join(', ')}`;
             }
@@ -234,45 +221,76 @@ app.post('/api/chat', async (req, res) => {
                 case 'overheat_check':  report = await analyzeStockOverheat(data, useDeep, 'normal'); break;
                 case 'valuation_check': report = await analyzeStockValuation(data, useDeep, 'normal'); break;
                 case 'etf_analysis':
-                    report = await analyzeETF(data, useDeep, 'normal', {
-                        isLeveraged: isLeveragedETF(ticker),
-                        peers: getETFPeers(ticker) || []
-                    });
+                    report = await analyzeETF(data, useDeep, 'normal', { isLeveraged: isLeveragedETF(ticker), peers: getETFPeers(ticker) || [] });
                     break;
                 default:
                     report = await (useDeep ? analyzeStock(data, useDeep, 'normal') : analyzeStockCasual(data, useDeep, 'normal'));
             }
 
-            sessions.update(chatId, {
-                lastAnalyzedTicker: ticker, lastAnalyzedName: name,
-                lastAnalyzedMarket: market, lastTickerTime: Date.now(),
-            });
+            sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastTickerTime: Date.now() });
 
-            const expectedQuestions = [
-                `${name || ticker} 최근 뉴스 요약해줘`,
-                `${name || ticker} 실적 전망 살펴보기`,
-                `${name || ticker} 경쟁사와 비교해줘`
-            ];
-
+            const expectedQuestions = [`${name || ticker} 최근 뉴스 요약해줘`, `${name || ticker} 실적 전망 살펴보기`, `${name || ticker} 경쟁사와 비교해줘`];
             messages.push({ type: 'analysis', content: report, ticker, name, expectedQuestions });
             return res.json({ messages });
         }
 
-        // 섹터 분석 (종목 매칭이 안 된 경우에만)
+        // MED: 점수 0.5 ~ 0.84 구간 (2~3개 후보 제시) (강제 매핑 금지)
+        if (suggestion.tier === 'MED' && suggestion.candidates.length > 0 && isStockIntent) {
+            console.log(`[API /chat] suggestCandidates MED: "${extracted}" → ${suggestion.candidates.length}개 후보`);
+            
+            const enrichedCandidates = await Promise.all(suggestion.candidates.slice(0, 3).map(async c => {
+                let price = null, changePct = null;
+                try {
+                    const data = await fetchAllStockData(c.ticker, c.name, c.corpCode || null);
+                    if (data?.price?.current != null) {
+                        price = data.price.current;
+                        changePct = data.price.changePct;
+                    }
+                } catch(e) {}
+                
+                const desc = getCompanyDesc(c.ticker) || null;
+                return { ...c, desc, price, changePct };
+            }));
+
+            // 유사도(confidence) 기준 내림차순 정렬 보장
+            enrichedCandidates.sort((a, b) => b.confidence - a.confidence);
+
+            const contentLines = [`입력하신 "${extracted}"에 해당하는 종목을 정확히 찾지 못했습니다.\n혹시 아래 종목 중 하나를 말씀하신 건가요?\n`];
+            enrichedCandidates.forEach(c => {
+                const currency = c.ticker.endsWith('.KS') || c.ticker.endsWith('.KQ') ? '₩' : '$';
+                const dStr = c.desc ? ` (${c.desc})` : '';
+                const priceInfo = c.price != null
+                    ? ` / ${currency}${c.price.toLocaleString()} / ${c.changePct > 0 ? '+' : ''}${c.changePct?.toFixed(2) || '0.00'}%`
+                    : ' / 가격 정보 없음';
+                
+                contentLines.push(`• ${c.ticker} - ${c.name}${dStr}${priceInfo}`);
+            });
+
+            messages.push({
+                type: 'candidates',
+                content: contentLines.join('\n'),
+                candidates: enrichedCandidates
+            });
+            return res.json({ messages });
+        }
+
+        // LOW: 완전히 실패한 경우, 종목 의도가 확실할 때만 에러 반환
+        if (suggestion.tier === 'LOW' && hasStockKeyword(text)) {
+            messages.push({ type: 'text', content: `종목을 찾지 못했습니다. 정확한 이름이나 티커로 다시 입력해주세요.` });
+            return res.json({ messages });
+        }
+
+        // 3. 섹터 분석
         const sectorInfo = resolveSector(text);
         if (sectorInfo || (intent.type === 'sector' && intent.sectorKey)) {
-            const key = sectorInfo
-                ? Object.keys(SECTOR_MAP).find(k => SECTOR_MAP[k].sector === sectorInfo.sector) || 'ai'
-                : intent.sectorKey;
+            const key = sectorInfo ? Object.keys(SECTOR_MAP).find(k => SECTOR_MAP[k].sector === sectorInfo.sector) || 'ai' : intent.sectorKey;
             const sectorData = await fetchSectorData(SECTOR_MAP[key]);
             const report = await analyzeSector(sectorData, useDeep, 'normal');
             messages.push({ type: 'analysis', content: report });
             return res.json({ messages });
         }
 
-
-
-        // 포트폴리오
+        // 4. 포트폴리오 분석
         if (isPortfolioInput(text)) {
             const items = parsePortfolio(text);
             if (items && items.length >= 2) {
@@ -280,148 +298,6 @@ app.post('/api/chat', async (req, res) => {
                 messages.push({ type: 'analysis', content: report });
                 return res.json({ messages });
             }
-        }
-
-        // 종목 키워드는 있는데 resolveStock이 실패한 경우 —
-        // 1) 유사 종목 제안 (findClosestAlias 하드코딩 기반)
-        // 2) ticker-search API 기반 자동 검색
-        if (hasStockKeyword(text)) {
-            const extracted = extractCompanyName(text) || text;
-
-            // ── 1) suggestCandidates — Levenshtein 기반 후보 추천 ──
-            const suggestion = suggestCandidates(extracted);
-
-            // tier=HIGH (≥0.85): 자동 분석 진행
-            if (suggestion.tier === 'HIGH' && suggestion.resolved) {
-                console.log(`[API /chat] suggestCandidates HIGH: "${extracted}" → ${suggestion.resolved.ticker}`);
-                let ticker = suggestion.resolved.ticker;
-                let name = suggestion.resolved.name;
-                let market = suggestion.resolved.market;
-                let corpCode = suggestion.resolved.corpCode || null;
-
-                if (market === 'KR') {
-                    const krInfo = resolveKoreanTicker(ticker);
-                    if (krInfo) { ticker = toFinnhubKRFormat(krInfo.ticker); name = krInfo.name; corpCode = krInfo.corpCode; }
-                    else { ticker = toFinnhubKRFormat(ticker); }
-                }
-
-                const data = await fetchAllStockData(ticker, name, corpCode);
-                data.investmentContext = session.context;
-                const reliability = computeDataReliability(data);
-                if (reliability.tier === 'NO_DATA') {
-                    messages.push({ type: 'text', content: `"${name}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!` });
-                    return res.json({ messages });
-                }
-                if (reliability.tier === 'PARTIAL') {
-                    data._dataWarning = `⚠️ 일부 데이터 미확보 (신뢰도 ${reliability.pct}%). 누락: ${reliability.missing.join(', ')}`;
-                }
-                const report = await (useDeep ? analyzeStock(data, useDeep, 'normal') : analyzeStockCasual(data, useDeep, 'normal'));
-                sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastTickerTime: Date.now() });
-                messages.push({ type: 'analysis', content: report, ticker, name });
-                return res.json({ messages });
-            }
-
-            // tier=MED (0.5~0.85): 후보 선택 UI 반환
-            if (suggestion.tier === 'MED' && suggestion.candidates.length > 0) {
-                console.log(`[API /chat] suggestCandidates MED: "${extracted}" → ${suggestion.candidates.length}개 후보`);
-                messages.push({
-                    type: 'candidates',
-                    content: `입력하신 "${extracted}"에 해당하는 종목을 정확히 찾지 못했습니다.\n혹시 아래 종목 중 하나를 말씀하신 건가요?`,
-                    candidates: suggestion.candidates.slice(0, 3).map(c => ({
-                        ticker: c.ticker,
-                        name: c.name,
-                        market: c.market,
-                        confidence: c.confidence,
-                        tier: c.tier,
-                        desc: getCompanyDesc(c.ticker) || null,
-                    })),
-                });
-                return res.json({ messages });
-            }
-
-            // ── 2) ticker-search API 폴백 (suggest도 LOW인 경우) ──
-            let searchResult;
-            try {
-                searchResult = await searchTicker(extracted);
-            } catch (err) {
-                console.warn('[API /chat] ticker-search 실패:', err.message);
-                searchResult = { found: false, auto: false, ticker: null, candidates: [] };
-            }
-
-            if (searchResult.found && searchResult.auto) {
-                console.log(`[API /chat] 자동 검색: "${extracted}" → ${searchResult.ticker}`);
-                const ticker = searchResult.ticker;
-                const name   = searchResult.name || ticker;
-
-                const data = await fetchAllStockData(ticker, name, null);
-                data.investmentContext = session.context;
-
-                const reliability = computeDataReliability(data);
-                if (reliability.tier === 'NO_DATA') {
-                    messages.push({ type: 'text', content: `"${name}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n\n잠시 후 다시 시도하거나, 정확한 티커를 확인해 주세요!` });
-                    return res.json({ messages });
-                }
-                if (reliability.tier === 'PARTIAL') {
-                    data._dataWarning = `⚠️ 일부 데이터 미확보 (신뢰도 ${reliability.pct}%). 누락: ${reliability.missing.join(', ')}`;
-                }
-
-                const searchIntent = await classifyQuery(text);
-                let stockIntent = 'full_analysis';
-                if (hasEarningsKeyword(text)) stockIntent = 'earnings_check';
-                else if (isETF(ticker)) stockIntent = 'etf_analysis';
-                else if (searchIntent.intent && searchIntent.intent !== 'fallback' && searchIntent.intent !== 'compare_stocks') stockIntent = searchIntent.intent;
-
-                let report;
-                switch (stockIntent) {
-                    case 'buy_timing':      report = await analyzeStockBuyTiming(data, useDeep, 'normal'); break;
-                    case 'sell_timing':     report = await analyzeStockSellTiming(data, useDeep, 'normal'); break;
-                    case 'risk_check':      report = await analyzeStockRisk(data, useDeep, 'normal'); break;
-                    case 'earnings_check':  report = await analyzeStockEarnings(data, useDeep, 'normal'); break;
-                    case 'etf_analysis':    report = await analyzeETF(data, useDeep, 'normal', { isLeveraged: isLeveragedETF(ticker), peers: getETFPeers(ticker) || [] }); break;
-                    default:                report = await (useDeep ? analyzeStock(data, useDeep, 'normal') : analyzeStockCasual(data, useDeep, 'normal'));
-                }
-
-                sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastTickerTime: Date.now() });
-                messages.push({ type: 'analysis', content: report, ticker, name });
-                return res.json({ messages });
-            }
-
-            // ticker-search에서 후보가 있으면 → candidates로 반환
-            if (searchResult.found && searchResult.candidates.length > 0) {
-                messages.push({
-                    type: 'candidates',
-                    content: `"${extracted}"에 해당하는 종목을 여러 개 찾았어요.\n혹시 아래 종목 중 하나를 말씀하신 건가요?`,
-                    candidates: searchResult.candidates.slice(0, 3).map(c => ({
-                        ticker: c.ticker,
-                        name: c.name,
-                        market: 'US',
-                        confidence: c.confidence,
-                        tier: c.confidence >= 0.85 ? 'HIGH' : c.confidence >= 0.5 ? 'MED' : 'LOW',
-                        desc: getCompanyDesc(c.ticker) || null,
-                    })),
-                });
-                return res.json({ messages });
-            } else if (suggestion && suggestion.candidates && suggestion.candidates.length > 0) {
-                // API 통합검색은 실패했으나, 로컬 사전에 유사 후보가 있는 경우 무조건 추천 버튼 표시
-                messages.push({
-                    type: 'candidates',
-                    content: `"${extracted}" 종목을 정확히 찾지 못했어요.\n혹시 아래 종목 중 하나를 말씀하신 건가요?`,
-                    candidates: suggestion.candidates.slice(0, 3).map(c => ({
-                        ticker: c.ticker,
-                        name: c.name,
-                        market: c.market || 'US',
-                        confidence: c.confidence,
-                        tier: c.tier || 'LOW',
-                        desc: getCompanyDesc(c.ticker) || null,
-                    })),
-                });
-                return res.json({ messages });
-            }
-
-            // ── 3) 모두 실패 ──
-            const noMatchMsg = `"${extracted}"에 해당하는 종목을 찾지 못했어요.\n\n정확한 티커(예: NVDA, TSLA, 005930)나 종목명(예: 엔비디아, 테슬라, 삼성전자)으로 다시 입력해 주세요!`;
-            messages.push({ type: 'text', content: noMatchMsg });
-            return res.json({ messages });
         }
 
         // Fallback

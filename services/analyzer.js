@@ -177,6 +177,9 @@ function computeScore(data) {
 // 데이터 기반 리포트 생성 (GPT 호출 없음)
 // ══════════════════════════════════════════════════════════
 function generateDataReport(data, mode = 'full') {
+    if (!data.price || data.price.current == null) {
+        return `⚠️ **분석 중단**\n종목 가격 데이터를 확보하지 못해 분석이 불가능합니다.`;
+    }
     const score = computeScore(data);
     const today = new Date().toLocaleDateString('ko-KR');
     const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
@@ -358,14 +361,22 @@ function generateDataReport(data, mode = 'full') {
         if (t.rsi != null && t.rsi > 65) lines.push(`• RSI ${t.rsi.toFixed(1)} → 과매수 접근, 일부 익절 고려`);
     }
 
-    // ━━━━━━ 데이터 출처 ━━━━━━
+    // ━━━━━━ 데이터 출처 및 신뢰도 ━━━━━━
     lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`📡 **데이터 출처**`);
-    lines.push(`• 가격: ${p.source || '없음'}`);
-    lines.push(`• 기술지표: ${t.source || '없음'}`);
-    lines.push(`• 재무: ${f.source || '없음'}`);
-    lines.push(`• 뉴스: ${newsAn.total > 0 ? newsAn.total + '건' : '없음'}`);
-    lines.push(`• 거시경제: ${data.macro?.source || '없음'}`);
+    lines.push(`📡 **데이터 신뢰도 및 출처**`);
+    if (data.metadata) {
+        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
+        if (data.metadata?.reason) {
+            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
+        }
+        lines.push(`• 데이터 출처:`);
+        lines.push(`  - 가격: ${data.metadata.sources.price}`);
+        lines.push(`  - 기술지표: ${data.metadata.sources.technical}`);
+        lines.push(`  - 재무: ${data.metadata.sources.fundamentals}`);
+        lines.push(`  - 뉴스/거시: ${data.metadata.sources.news} / ${data.metadata.sources.macro}`);
+    } else {
+        lines.push(`• 출처: 가격(${p.source || '없음'}) | 재무(${f.source || '없음'})`);
+    }
 
     return lines.join('\n');
 }
@@ -391,6 +402,7 @@ async function analyzeStockSellTiming(data, useDeep = false, tone = 'normal') {
 }
 
 async function analyzeStockRisk(data, useDeep = false, tone = 'normal') {
+    if (!data.price || data.price.current == null) return `⚠️ **분석 중단**\n종목 가격 데이터를 확보하지 못하여 리스크 분석을 중단합니다.`;
     const score = computeScore(data);
     const today = new Date().toLocaleDateString('ko-KR');
     const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
@@ -438,11 +450,22 @@ async function analyzeStockRisk(data, useDeep = false, tone = 'normal') {
         for (const n of newsAn.negative.slice(0, 2)) lines.push(`  🔴 ${n.title.slice(0, 60)}`);
     }
 
-    lines.push(`\n📡 가격: ${p.source || '없음'} | 기술: ${t.source || '없음'} | 재무: ${f.source || '없음'}`);
+    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`📡 **데이터 신뢰도 및 출처**`);
+    if (data.metadata) {
+        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
+        if (data.metadata?.reason) {
+            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
+        }
+        lines.push(`• 출처: 가격(${data.metadata.sources.price}) | 기술(${data.metadata.sources.technical}) | 재무(${data.metadata.sources.fundamentals})`);
+    } else {
+        lines.push(`• 출처: 가격(${p.source || '없음'}) | 기술(${t.source || '없음'}) | 재무(${f.source || '없음'})`);
+    }
     return lines.join('\n');
 }
 
 async function analyzeStockEarnings(data, useDeep = false, tone = 'normal') {
+    if (!data.price || data.price.current == null) return `⚠️ **분석 중단**\n종목 가격 데이터를 확보하지 못하여 실적 분석을 중단합니다.`;
     const today = new Date().toLocaleDateString('ko-KR');
     const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
     const name = data.companyName || data.ticker;
@@ -465,7 +488,17 @@ async function analyzeStockEarnings(data, useDeep = false, tone = 'normal') {
         lines.push(`\n**기관 목표가:** ${fmtPrice(parseFloat(c.targetMean).toFixed(2), currency)} | 컨센서스: ${c.rating || '데이터 없음'}`);
     }
 
-    lines.push(`\n📡 재무: ${f.source || '없음'} | 애널리스트: ${data.analystRatings?.source || '없음'}`);
+    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`📡 **데이터 신뢰도 및 출처**`);
+    if (data.metadata) {
+        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
+        if (data.metadata?.reason) {
+            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
+        }
+        lines.push(`• 출처: 재무(${data.metadata.sources.fundamentals})`);
+    } else {
+        lines.push(`• 출처: 재무(${f.source || '없음'}) | 애널리스트(${data.analystRatings?.source || '없음'})`);
+    }
     return lines.join('\n');
 }
 
@@ -514,7 +547,15 @@ async function analyzeStockOverheat(data, useDeep = false, tone = 'normal') {
         else lines.push(`\n✅ **추격매수 위험: 낮음** (1개월 ${chg.toFixed(1)}%)`);
     }
 
-    lines.push(`\n📡 가격: ${p.source || '없음'} | 기술: ${t.source || '없음'}`);
+    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`📡 **데이터 신뢰도 및 출처**`);
+    if (data.metadata) {
+        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
+        if (data.metadata?.reason) {
+            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
+        }
+        lines.push(`• 출처: 가격(${data.metadata.sources.price}) | 기술(${data.metadata.sources.technical})`);
+    }
     return lines.join('\n');
 }
 
@@ -550,11 +591,20 @@ async function analyzeStockValuation(data, useDeep = false, tone = 'normal') {
     lines.push(`**매출성장(YoY):** ${f.revenueGrowthYoY != null ? f.revenueGrowthYoY : '데이터 없음'}`);
     if (f.mktCap) lines.push(`**시가총액:** ${fmtLargeNum(f.mktCap, currency)}`);
 
-    lines.push(`\n📡 재무: ${f.source || '없음'}`);
+    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`📡 **데이터 신뢰도 및 출처**`);
+    if (data.metadata) {
+        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
+        if (data.metadata?.reason) {
+            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
+        }
+        lines.push(`• 출처: 가격(${data.metadata.sources.price}) | 재무(${data.metadata.sources.fundamentals})`);
+    }
     return lines.join('\n');
 }
 
 async function analyzeStockComparison(data1, data2, useDeep = false, tone = 'normal') {
+    if (!data1.price?.current || !data2.price?.current) return `⚠️ **분석 중단**\n한쪽 종목 가격 데이터를 확보하지 못하여 비교할 수 없습니다.`;
     const today = new Date().toLocaleDateString('ko-KR');
     const score1 = computeScore(data1);
     const score2 = computeScore(data2);
@@ -594,7 +644,15 @@ async function analyzeStockComparison(data1, data2, useDeep = false, tone = 'nor
     lines.push(`• ${nameA}: ${score1.detail.join(' | ')}`);
     lines.push(`• ${nameB}: ${score2.detail.join(' | ')}`);
 
-    lines.push(`\n📡 ${data1.ticker}: ${data1.price?.source || '없음'} | ${data2.ticker}: ${data2.price?.source || '없음'}`);
+    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`📡 **데이터 신뢰도 및 출처**`);
+    if (data1.metadata) {
+        lines.push(`• **신뢰도:** [${nameA}] ${data1.metadata.confidence} | [${nameB}] ${data2.metadata.confidence}`);
+        lines.push(`• **계산 근거:** [${nameA}] ${data1.metadata.reason} | [${nameB}] ${data2.metadata.reason}`);
+        lines.push(`• **출처:** [${nameA}] 가격(${data1.metadata.sources.price})/재무(${data1.metadata.sources.fundamentals}) | [${nameB}] 가격(${data2.metadata.sources.price})/재무(${data2.metadata.sources.fundamentals})`);
+    } else {
+        lines.push(`• 출처: [${nameA}] 가격(${data1.price?.source || '없음'}) | [${nameB}] 가격(${data2.price?.source || '없음'})`);
+    }
     return lines.join('\n');
 }
 
@@ -625,9 +683,12 @@ async function callOpenAI(userContent, useDeepModel = false, tone = 'normal') {
 // Market/Sector/ETF/Portfolio/Recommendation — GPT 유지 (시장 전체 분석)
 async function analyzeMarket(data, useDeep = false, tone = 'normal') {
     const { indices, macro, news } = data;
+    if (!indices || !macro || macro.vix == null) {
+        return `⚠️ **브리핑 중단**\n거시 경제 데이터(FRED/Yahoo)를 가져오지 못해 시장 브리핑을 생성할 수 없습니다. 잠시 후 다시 시도해주세요.`;
+    }
     const newsText = (news || []).slice(0, 6).map(n => `- [${n.publishedAt}] ${n.title}`).join('\n');
     const today = new Date().toLocaleDateString('ko-KR');
-    const prompt = `시장 전체 분석. 데이터만 사용, 추론 금지.\n[기준일: ${today}]\nS&P500: ${indices?.['S&P 500']?.current || 'N/A'} (${indices?.['S&P 500']?.changePct?.toFixed(2) || 'N/A'}%)\nNASDAQ: ${indices?.['NASDAQ']?.current || 'N/A'} (${indices?.['NASDAQ']?.changePct?.toFixed(2) || 'N/A'}%)\n금리: ${macro?.federalFundsRate || 'N/A'}% | VIX: ${macro?.vix || 'N/A'}\n뉴스:\n${newsText || '없음'}\n\n간결하게 요약: 1) 시장 현황 2) 거시경제 영향 3) 리스크 4) 전략`;
+    const prompt = `시장 전체 분석. 데이터만 사용, 추론 금지.\n[기준일: ${today}]\nS&P500: ${indices?.['S&P 500']?.current || '확인불가'} (${indices?.['S&P 500']?.changePct?.toFixed(2) || '확인불가'}%)\nNASDAQ: ${indices?.['NASDAQ']?.current || '확인불가'} (${indices?.['NASDAQ']?.changePct?.toFixed(2) || '확인불가'}%)\n금리: ${macro?.federalFundsRate ?? '확인불가'}% | VIX: ${macro?.vix ?? '확인불가'}\n뉴스:\n${newsText || '없음'}\n\n간결하게 요약: 1) 시장 현황 2) 거시경제 영향 3) 리스크 4) 전략. '확인불가'로 나오는 지표는 브리핑에서 절대 언급하지 말고 제외할 것.`;
     return callOpenAI(prompt, useDeep, tone);
 }
 

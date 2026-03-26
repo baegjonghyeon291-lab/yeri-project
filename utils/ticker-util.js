@@ -89,18 +89,12 @@ const US_COMPANY_MAP = {
     // Big Tech
     '애플': { ticker: 'AAPL', name: 'Apple' },
     'apple': { ticker: 'AAPL', name: 'Apple' },
-    '아이폰회사': { ticker: 'AAPL', name: 'Apple' },
-    '아이폰': { ticker: 'AAPL', name: 'Apple' },
-    '아이렌': { ticker: 'AAPL', name: 'Apple' },
-    '애플이': { ticker: 'AAPL', name: 'Apple' },
     '테슬라': { ticker: 'TSLA', name: 'Tesla' },
     'tesla': { ticker: 'TSLA', name: 'Tesla' },
     '엔비디아': { ticker: 'NVDA', name: 'NVIDIA' },
-    '엔비디아칩': { ticker: 'NVDA', name: 'NVIDIA' },
     'nvidia': { ticker: 'NVDA', name: 'NVIDIA' },
     '마이크로소프트': { ticker: 'MSFT', name: 'Microsoft' },
     'microsoft': { ticker: 'MSFT', name: 'Microsoft' },
-    '마소': { ticker: 'MSFT', name: 'Microsoft' },
     '구글': { ticker: 'GOOGL', name: 'Alphabet (Google)' },
     'google': { ticker: 'GOOGL', name: 'Alphabet (Google)' },
     '알파벳': { ticker: 'GOOGL', name: 'Alphabet (Google)' },
@@ -133,7 +127,6 @@ const US_COMPANY_MAP = {
     '퀄컴': { ticker: 'QCOM', name: 'Qualcomm' },
     'qualcomm': { ticker: 'QCOM', name: 'Qualcomm' },
     'arm': { ticker: 'ARM', name: 'Arm Holdings' },
-    '아머': { ticker: 'ARM', name: 'Arm Holdings' },
     // Software / Platform
     '팔란티어': { ticker: 'PLTR', name: 'Palantir' },
     'palantir': { ticker: 'PLTR', name: 'Palantir' },
@@ -299,18 +292,11 @@ const US_COMPANY_MAP = {
     '심보틱': { ticker: 'SYM', name: 'Symbotic' },
     'symbotic': { ticker: 'SYM', name: 'Symbotic' },
     '빅베어ai': { ticker: 'BBAI', name: 'BigBear.ai' },
-    '빅베어': { ticker: 'BBAI', name: 'BigBear.ai' },
     'bigbear': { ticker: 'BBAI', name: 'BigBear.ai' },
-    'bbai': { ticker: 'BBAI', name: 'BigBear.ai' },
-    'babi': { ticker: 'BBAI', name: 'BigBear.ai' },
     '사운드하운드': { ticker: 'SOUN', name: 'SoundHound AI' },
     'soundhound': { ticker: 'SOUN', name: 'SoundHound AI' },
-    '사운': { ticker: 'SOUN', name: 'SoundHound AI' },
-    '사운드': { ticker: 'SOUN', name: 'SoundHound AI' },
-    'soun': { ticker: 'SOUN', name: 'SoundHound AI' },
     '아이온큐': { ticker: 'IONQ', name: 'IonQ' },
     'ionq': { ticker: 'IONQ', name: 'IonQ' },
-    '아이온': { ticker: 'IONQ', name: 'IonQ' },
     'c3ai': { ticker: 'AI', name: 'C3.ai' },
     'ai': { ticker: 'AI', name: 'C3.ai' },
     'smr': { ticker: 'SMR', name: 'NuScale Power' },
@@ -521,28 +507,7 @@ function getETFPeers(ticker) {
 // ──────────────────────────────────────────────────────────
 // ABBREVIATION MAP — 축약어 전용 매핑 (fuzzy match 전 우선 체크)
 // ──────────────────────────────────────────────────────────
-const ABBREVIATION_MAP = {
-    '듀오': { ticker: 'DUOL', name: 'Duolingo' },
-    '엔비': { ticker: 'NVDA', name: 'NVIDIA' },
-    '브로드': { ticker: 'AVGO', name: 'Broadcom' },
-    '팔란': { ticker: 'PLTR', name: 'Palantir' },
-    '구글어플': { ticker: 'GOOGL', name: 'Alphabet (Google)' },
-    '구글앱': { ticker: 'GOOGL', name: 'Alphabet (Google)' },
-    '테슬': { ticker: 'TSLA', name: 'Tesla' },
-    '아마': { ticker: 'AMZN', name: 'Amazon' },
-    '넷플': { ticker: 'NFLX', name: 'Netflix' },
-    '스노우': { ticker: 'SNOW', name: 'Snowflake' },
-    '팔로': { ticker: 'PANW', name: 'Palo Alto Networks' },
-    '어도': { ticker: 'ADBE', name: 'Adobe' },
-    '세포': { ticker: 'CRM', name: 'Salesforce' },
-    '코인': { ticker: 'COIN', name: 'Coinbase' },
-    '리비': { ticker: 'RIVN', name: 'Rivian' },
-    '루시': { ticker: 'LCID', name: 'Lucid' },
-    '마벨': { ticker: 'MRVL', name: 'Marvell Technology' },
-    '마이크': { ticker: 'MU', name: 'Micron Technology' },
-    '슈마': { ticker: 'SMCI', name: 'Super Micro Computer' },
-    '슈퍼마': { ticker: 'SMCI', name: 'Super Micro Computer' },
-};
+const ABBREVIATION_MAP = {};
 
 // ──────────────────────────────────────────────────────────
 // PORTFOLIO PARSER — 포트폴리오 입력 파싱

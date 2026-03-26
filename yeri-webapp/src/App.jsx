@@ -221,7 +221,8 @@ function ChatPage({ chatId }) {
                         <div className="candidate-main">
                           <span className="candidate-ticker">{c.ticker}</span>
                           <span className="candidate-name">
-                            {c.name}{c.desc ? ` — ${truncDesc(c.desc)}` : ''}
+                            - {c.name}{c.desc ? ` (${truncDesc(c.desc)})` : ''}
+                            {c.price != null ? ` / ${c.ticker.endsWith('.KS') || c.ticker.endsWith('.KQ') ? '₩' : '$'}${c.price.toLocaleString()} / ${c.changePct > 0 ? '+' : ''}${c.changePct?.toFixed(2)}%` : ' / 가격 정보 없음'}
                           </span>
                         </div>
                         <span className="candidate-conf">{Math.round(c.confidence * 100)}% 유사</span>
@@ -420,7 +421,7 @@ export default function App() {
     <div className="app">
       {/* 탑바 */}
       <header className="topbar">
-        <span className="topbar-logo">예리 💛</span>
+        <span className="topbar-logo">예리 v3 💛</span>
         <nav className="topbar-nav">
           <button className={page === 'watchlist' ? 'active' : ''} onClick={() => setPage('watchlist')}>
             관심종목
