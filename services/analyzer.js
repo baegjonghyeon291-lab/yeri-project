@@ -386,225 +386,92 @@ function generateDataReport(data, mode = 'full') {
 }
 
 // ══════════════════════════════════════════════════════════
-// 개별 분석 함수들 — 모두 generateDataReport() 사용
+// GPT 기반 개별 종목 분석 (AnalyzeStock 시리즈)
 // ══════════════════════════════════════════════════════════
 
-async function analyzeStock(data, useDeep = false, tone = 'normal') {
-    return generateDataReport(data, 'full');
+function buildContextForLLM(data) {
+    // 내부적으로 사용하는 generateDataReport를 LLM에게 Context로 제공하는 용도
+    const rawReport = generateDataReport(data, 'full');
+    let newsContext = '';
+    if (data.news && data.news.length > 0) {
+        newsContext = '\n[📰 최신 뉴스 (최대 5건)]\n' + data.news.slice(0, 5).map(n => `- [${n.source}] ${n.title} (${n.publishedAt})`).join('\n');
+    }
+    return `<RawData>\n${rawReport}\n${newsContext}\n</RawData>`;
 }
 
+const STOCK_PROMPT_TEMPLATE = `당신은 최고 수준의 데이터 기반 투자 애널리스트 "예리"입니다.
+제공된 <RawData>를 바탕으로 반드시 다음 마크다운 구조를 '정확히' 지켜서 분석 리포트를 작성하세요.
+
+[🚨 핵심 규칙]
+1. 오직 데이터 기반: 없는 정보 추측 금지. 데이터가 누락된 부분은 "데이터 부족"으로 명시하세요.
+2. 출력 형식 고정: 매번 아래 마크다운 양식을 100% 동일하게 유지하세요. (불필요한 인사말이나 부연 설명 절대 금지)
+3. 길이 제한: 설명은 아주 간결하고 명확하게 핵심만 작성하세요.
+4. 우선순위: 뉴스 센티먼트보다 '가격/재무/차트 지표'의 숫자 데이터를 최우선으로 분석하세요.
+
+# 📊 [종목명] 분석 리포트
+**🎯 요약 결론**: (이 종목의 현재 상태를 한 줄로 통찰력 있게 요약)
+
+## 📈 상승 요인 (Bull Case)
+- (재무 펀더멘털 또는 차트 상승 모멘텀 기반 긍정 신호 요약)
+- (긍정적인 뉴스 또는 추세 지지 요소)
+
+## 📉 하락 요인 및 리스크 (Bear Case)
+- (고평가 밸류에이션, 차트 저항/이탈, 적자 등 악재 요약)
+
+## 📰 뉴스 센티먼트 분석
+- **시장 분위기**: (긍정/부정/중립) - (최근 관련 뉴스의 핵심 심리 요약)
+
+## 💯 부문별 점수 평가 (0~100점)
+- 🚀 **성장성**: [0~100]점 (근거: 매출성장, EPS 등)
+- 🛡️ **안정성**: [0~100]점 (근거: 현금흐름, 부채, 흑자여부 등)
+- 🏄 **모멘텀**: [0~100]점 (근거: RSI, EMA, 과거 수익률 등 단기 추세)
+- 🏆 **종합 점수**: [위 3개 점수의 평균]점
+
+## 💡 최종 투자 관점 및 판단
+- **단기 관점**: (트레이딩 관점의 접근 전략. 예: 지지선 매수 도달, 관망 등)
+- **중장기 관점**: (펀더멘털 관점의 보유 전략. 예: 비중 억제, 장기 우상향 등)
+- **추천 액션**: (현재 매수 적절성 명쾌하게 판정)
+- **💡 동종 업계 관심 종목**: (해당 종목이 속한 섹터 내 비슷한 혹은 대안이 될 만한 종목 1~2개 추천)
+`;
+
+async function analyzeStock(data, useDeep = false, tone = 'normal') {
+    const prompt = `${STOCK_PROMPT_TEMPLATE}\n\n${buildContextForLLM(data)}`;
+    return callOpenAI(prompt, useDeep, tone);
+}
+
+// 질문의 속성에 따라 최종 판단(추천 액션)의 뉘앙스를 강조해주되, 구조는 동일하게 유지
 async function analyzeStockCasual(data, useDeep = false, tone = 'normal') {
-    return generateDataReport(data, 'full');
+    return analyzeStock(data, useDeep, tone);
 }
 
 async function analyzeStockBuyTiming(data, useDeep = false, tone = 'normal') {
-    return generateDataReport(data, 'buy');
+    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] '💡 최종 투자 관점 및 판단' 셀에서 단기 매수 적절성(Buy Timing)과 목표가/손절가를 명확히 짚어주세요.\n\n${buildContextForLLM(data)}`;
+    return callOpenAI(prompt, useDeep, tone);
 }
 
 async function analyzeStockSellTiming(data, useDeep = false, tone = 'normal') {
-    return generateDataReport(data, 'sell');
+    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] '💡 최종 투자 관점 및 판단' 셀에서 매도 및 익절/손절(Sell Timing) 관점을 중점적으로 짚어주세요.\n\n${buildContextForLLM(data)}`;
+    return callOpenAI(prompt, useDeep, tone);
 }
 
 async function analyzeStockRisk(data, useDeep = false, tone = 'normal') {
-    if (!data.price || data.price.current == null) return `⚠️ **분석 중단**\n종목 가격 데이터를 확보하지 못하여 리스크 분석을 중단합니다.`;
-    const score = computeScore(data);
-    const today = new Date().toLocaleDateString('ko-KR');
-    const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
-    const name = data.companyName || data.ticker;
-    const f = data.fundamentals || {};
-    const t = data.technical || {};
-    const p = data.price || {};
-
-    const lines = [];
-    lines.push(`⚠️ **${name} (${data.ticker}) 리스크 분석**`);
-    lines.push(`기준일: ${today}\n`);
-
-    lines.push(`📌 **종합 점수: ${score.normalized !== null ? score.normalized + '/10' : '판단 불가'}** → ${score.verdict}\n`);
-
-    // 리스크 항목
-    lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`**리스크 항목**\n`);
-
-    if (f.peRatio != null) {
-        const pe = parseFloat(f.peRatio);
-        lines.push(`• 밸류에이션: PER ${pe.toFixed(1)} → ${pe > 40 ? '고평가 부담' : pe < 0 ? '적자 상태' : '적정 수준'}`);
-    } else lines.push(`• 밸류에이션: 데이터 없음`);
-
-    if (f.debtToEquity != null) {
-        const de = parseFloat(f.debtToEquity);
-        lines.push(`• 재무 건전성: D/E ${de.toFixed(1)} → ${de > 150 ? '부채 비율 높음' : de > 80 ? '보통' : '양호'}`);
-    } else lines.push(`• 재무 건전성: 데이터 없음`);
-
-    if (f.freeCashFlow != null) {
-        lines.push(`• 현금흐름: FCF ${fmtLargeNum(f.freeCashFlow, currency)} → ${f.freeCashFlow > 0 ? '양호' : '유동성 위험'}`);
-    } else lines.push(`• 현금흐름: 데이터 없음`);
-
-    if (t.rsi != null) {
-        lines.push(`• 기술적 위험: RSI ${t.rsi.toFixed(1)} → ${t.rsi > 70 ? '과매수 조정 위험' : t.rsi < 30 ? '과매도 (반등 가능)' : '중립'}`);
-    } else lines.push(`• 기술적 위험: 데이터 없음`);
-
-    if (p.current != null && data.supportResist?.support) {
-        const distToSupport = ((p.current - data.supportResist.support) / p.current * 100).toFixed(1);
-        lines.push(`• 지지선 거리: ${distToSupport}% (${fmtPrice(data.supportResist.support, currency)}) → ${distToSupport < 3 ? '임박' : '여유'}`);
-    }
-
-    const newsAn = filterAndAnalyzeNews(data.news, data.ticker, name);
-    if (newsAn.negative.length > 0) {
-        lines.push(`• 뉴스 리스크: 부정 뉴스 ${newsAn.negative.length}건`);
-        for (const n of newsAn.negative.slice(0, 2)) lines.push(`  🔴 ${n.title.slice(0, 60)}`);
-    }
-
-    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`📡 **데이터 신뢰도 및 출처**`);
-    if (data.metadata) {
-        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
-        if (data.metadata?.reason) {
-            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
-        }
-        lines.push(`• 출처: 가격(${data.metadata.sources.price}) | 기술(${data.metadata.sources.technical}) | 재무(${data.metadata.sources.fundamentals})`);
-    } else {
-        lines.push(`• 출처: 가격(${p.source || '없음'}) | 기술(${t.source || '없음'}) | 재무(${f.source || '없음'})`);
-    }
-    return lines.join('\n');
+    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] '📉 하락 요인 및 리스크' 섹션을 가장 상세히 분석하세요.\n\n${buildContextForLLM(data)}`;
+    return callOpenAI(prompt, useDeep, tone);
 }
 
 async function analyzeStockEarnings(data, useDeep = false, tone = 'normal') {
-    if (!data.price || data.price.current == null) return `⚠️ **분석 중단**\n종목 가격 데이터를 확보하지 못하여 실적 분석을 중단합니다.`;
-    const today = new Date().toLocaleDateString('ko-KR');
-    const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
-    const name = data.companyName || data.ticker;
-    const f = data.fundamentals || {};
-
-    const lines = [];
-    lines.push(`📅 **${name} (${data.ticker}) 실적 데이터**`);
-    lines.push(`기준일: ${today}\n`);
-
-    lines.push(`**다음 실적 발표:** ${f.nextEarningsDate || '데이터 없음'}`);
-    lines.push(`**EPS:** ${f.eps != null ? f.eps : '데이터 없음'}`);
-    lines.push(`**선행 PER:** ${f.forwardPE != null ? f.forwardPE : '데이터 없음'}`);
-    lines.push(`**매출:** ${f.revenue != null ? fmtLargeNum(f.revenue, currency) : '데이터 없음'}`);
-    lines.push(`**순이익:** ${f.netIncome != null ? fmtLargeNum(f.netIncome, currency) : '데이터 없음'}`);
-    lines.push(`**매출성장(YoY):** ${f.revenueGrowthYoY != null ? f.revenueGrowthYoY : '데이터 없음'}`);
-    lines.push(`**순이익률:** ${f.netMargin != null ? f.netMargin : '데이터 없음'}`);
-
-    if (data.analystRatings?.consensus?.targetMean) {
-        const c = data.analystRatings.consensus;
-        lines.push(`\n**기관 목표가:** ${fmtPrice(parseFloat(c.targetMean).toFixed(2), currency)} | 컨센서스: ${c.rating || '데이터 없음'}`);
-    }
-
-    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`📡 **데이터 신뢰도 및 출처**`);
-    if (data.metadata) {
-        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
-        if (data.metadata?.reason) {
-            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
-        }
-        lines.push(`• 출처: 재무(${data.metadata.sources.fundamentals})`);
-    } else {
-        lines.push(`• 출처: 재무(${f.source || '없음'}) | 애널리스트(${data.analystRatings?.source || '없음'})`);
-    }
-    return lines.join('\n');
+    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] 분석 시 최신 실적(EPS, 매출) 데이터의 퀄리티와 안정성 비중을 높여서 해석하세요.\n\n${buildContextForLLM(data)}`;
+    return callOpenAI(prompt, useDeep, tone);
 }
 
 async function analyzeStockOverheat(data, useDeep = false, tone = 'normal') {
-    const today = new Date().toLocaleDateString('ko-KR');
-    const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
-    const name = data.companyName || data.ticker;
-    const t = data.technical || {};
-    const p = data.price || {};
-    const h = data.history || {};
-
-    const lines = [];
-    lines.push(`🌡️ **${name} (${data.ticker}) 과열 분석**`);
-    lines.push(`기준일: ${today}\n`);
-
-    // 판단
-    let heatLevel;
-    if (t.rsi != null) {
-        if (t.rsi > 70) heatLevel = '🔴 과열 (과매수)';
-        else if (t.rsi > 60) heatLevel = '🟠 경계';
-        else if (t.rsi > 40) heatLevel = '🟢 정상';
-        else if (t.rsi > 30) heatLevel = '🔵 저온 (과매도 접근)';
-        else heatLevel = '🔵 과매도';
-    } else heatLevel = '데이터 없음';
-
-    lines.push(`📌 **과열 판단: ${heatLevel}**\n`);
-
-    lines.push(`**RSI(14):** ${t.rsi != null ? t.rsi.toFixed(1) : '데이터 없음'}`);
-    lines.push(`**1주 수익률:** ${h.change1W != null ? fmtPct(h.change1W) : '데이터 없음'}`);
-    lines.push(`**1개월 수익률:** ${h.change1M != null ? fmtPct(h.change1M) : '데이터 없음'}`);
-    if (p.fifty2High != null && p.current != null) {
-        const pctFromHigh = ((p.current / p.fifty2High - 1) * 100).toFixed(1);
-        lines.push(`**52주 고점 대비:** ${pctFromHigh}%`);
-    } else lines.push(`**52주 고점 대비:** 데이터 없음`);
-
-    if (data.bbands) {
-        const pos = p.current != null ? (p.current > data.bbands.upper ? '상단 돌파' : p.current < data.bbands.lower ? '하단 이탈' : '밴드 내') : '데이터 없음';
-        lines.push(`**볼린저밴드:** ${pos} (상단: ${fmtPrice(data.bbands.upper, currency)} / 하단: ${fmtPrice(data.bbands.lower, currency)})`);
-    }
-
-    // 추격매수 위험도
-    if (h.change1M != null) {
-        const chg = parseFloat(h.change1M);
-        if (chg > 20) lines.push(`\n⚠️ **추격매수 위험: 높음** (1개월 +${chg.toFixed(1)}%)`);
-        else if (chg > 10) lines.push(`\n⚠️ **추격매수 위험: 보통** (1개월 +${chg.toFixed(1)}%)`);
-        else lines.push(`\n✅ **추격매수 위험: 낮음** (1개월 ${chg.toFixed(1)}%)`);
-    }
-
-    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`📡 **데이터 신뢰도 및 출처**`);
-    if (data.metadata) {
-        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
-        if (data.metadata?.reason) {
-            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
-        }
-        lines.push(`• 출처: 가격(${data.metadata.sources.price}) | 기술(${data.metadata.sources.technical})`);
-    }
-    return lines.join('\n');
+    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] 기술적 지표(RSI, 볼린저밴드 기준 과매수/과매도 등)에 집중하여 '현재 단기 고점(과열) 여부'를 강조하세요.\n\n${buildContextForLLM(data)}`;
+    return callOpenAI(prompt, useDeep, tone);
 }
 
 async function analyzeStockValuation(data, useDeep = false, tone = 'normal') {
-    const today = new Date().toLocaleDateString('ko-KR');
-    const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
-    const name = data.companyName || data.ticker;
-    const f = data.fundamentals || {};
-
-    const lines = [];
-    lines.push(`💰 **${name} (${data.ticker}) 밸류에이션 분석**`);
-    lines.push(`기준일: ${today}\n`);
-
-    // 판단
-    const pe = f.peRatio ? parseFloat(f.peRatio) : null;
-    let valLevel;
-    if (pe != null) {
-        if (pe < 0) valLevel = '⚠️ 적자 (PER 음수)';
-        else if (pe < 15) valLevel = '🟢 저평가';
-        else if (pe <= 25) valLevel = '🟡 적정';
-        else if (pe <= 40) valLevel = '🟠 다소 고평가';
-        else valLevel = '🔴 고평가';
-    } else valLevel = '데이터 없음';
-
-    lines.push(`📌 **밸류에이션 판단: ${valLevel}**\n`);
-
-    lines.push(`**PER:** ${f.peRatio != null ? f.peRatio : '데이터 없음'}`);
-    lines.push(`**선행 PER:** ${f.forwardPE != null ? f.forwardPE : '데이터 없음'}`);
-    lines.push(`**PBR:** ${f.pbRatio != null ? f.pbRatio : '데이터 없음'}`);
-    lines.push(`**EPS:** ${f.eps != null ? f.eps : '데이터 없음'}`);
-    lines.push(`**ROE:** ${f.roe != null ? f.roe : '데이터 없음'}`);
-    lines.push(`**순이익률:** ${f.netMargin != null ? f.netMargin : '데이터 없음'}`);
-    lines.push(`**매출성장(YoY):** ${f.revenueGrowthYoY != null ? f.revenueGrowthYoY : '데이터 없음'}`);
-    if (f.mktCap) lines.push(`**시가총액:** ${fmtLargeNum(f.mktCap, currency)}`);
-
-    lines.push(`\n━━━━━━━━━━━━━━━━━━━━━━`);
-    lines.push(`📡 **데이터 신뢰도 및 출처**`);
-    if (data.metadata) {
-        lines.push(`• **신뢰도: ${data.metadata.confidence}**`);
-        if (data.metadata?.reason) {
-            lines.push(`• **계산 근거:** ${data.metadata.reason}`);
-        }
-        lines.push(`• 출처: 가격(${data.metadata.sources.price}) | 재무(${data.metadata.sources.fundamentals})`);
-    }
-    return lines.join('\n');
+    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] 펀더멘털 측면의 밸류에이션(PER, PBR 등 고평가/저평가 여부)을 중심으로 종합판단을 내리세요.\n\n${buildContextForLLM(data)}`;
+    return callOpenAI(prompt, useDeep, tone);
 }
 
 async function analyzeStockComparison(data1, data2, useDeep = false, tone = 'normal') {
