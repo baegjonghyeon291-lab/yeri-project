@@ -2,6 +2,7 @@
  * ticker-util.js
  * Maps Korean company names / tickers / codes and sector keywords.
  */
+const { KOREAN_TICKER_MAP } = require('./korean-tickers');
 
 const KR_COMPANY_MAP = {
     // 삼성 그룹
@@ -454,6 +455,12 @@ const ETF_MAP = {
     '리츠etf':  { ticker: 'VNQ', name: 'Vanguard Real Estate ETF' },
 };
 
+// ── 대규모 사전 데이터 병합 ──
+for (const [k, v] of Object.entries(KOREAN_TICKER_MAP)) {
+    if (v.market === 'KR') KR_COMPANY_MAP[k] = v;
+    else US_COMPANY_MAP[k] = v;
+}
+
 // ──────────────────────────────────────────────────────────
 // LEVERAGED ETF DETECTION
 // ──────────────────────────────────────────────────────────
@@ -822,8 +829,8 @@ function normalize(raw) {
 // ──────────────────────────────────────────────────────────
 // LEVENSHTEIN DISTANCE — 편집 거리 기반 fuzzy matching
 // ──────────────────────────────────────────────────────────
-function levenshteinDistance(a, b) {
-    const m = a.length, n = b.length;
+function levenshteinDistance(aArr, bArr) {
+    const m = aArr.length, n = bArr.length;
     if (m === 0) return n;
     if (n === 0) return m;
     const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
@@ -831,7 +838,7 @@ function levenshteinDistance(a, b) {
     for (let j = 0; j <= n; j++) dp[0][j] = j;
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
-            dp[i][j] = a[i - 1] === b[j - 1]
+            dp[i][j] = aArr[i - 1] === bArr[j - 1]
                 ? dp[i - 1][j - 1]
                 : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
         }
@@ -839,11 +846,34 @@ function levenshteinDistance(a, b) {
     return dp[m][n];
 }
 
-// 유사도 점수 (0~1, 높을수록 유사)
+const CHO = ['ㄱ','ㄲ','ㄴ','ㄷ','ㄸ','ㄹ','ㅁ','ㅂ','ㅃ','ㅅ','ㅆ','ㅇ','ㅈ','ㅉ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+const JUNG = ['ㅏ','ㅐ','ㅑ','ㅒ','ㅓ','ㅔ','ㅕ','ㅖ','ㅗ','ㅘ','ㅙ','ㅚ','ㅛ','ㅜ','ㅝ','ㅞ','ㅟ','ㅠ','ㅡ','ㅢ','ㅣ'];
+const JONG = ['','ㄱ','ㄲ','ㄳ','ㄴ','ㄵ','ㄶ','ㄷ','ㄹ','ㄺ','ㄻ','ㄼ','ㄽ','ㄾ','ㄿ','ㅀ','ㅁ','ㅂ','ㅄ','ㅅ','ㅆ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+
+function decomposeKorean(str) {
+    const arr = [];
+    for (let i = 0; i < str.length; i++) {
+        const c = str.charCodeAt(i);
+        if (c >= 0xAC00 && c <= 0xD7A3) {
+            const base = c - 0xAC00;
+            arr.push(CHO[Math.floor(base / 588)]);
+            arr.push(JUNG[Math.floor((base % 588) / 28)]);
+            const jong = base % 28;
+            if (jong > 0) arr.push(JONG[jong]);
+        } else {
+            arr.push(str[i]);
+        }
+    }
+    return arr;
+}
+
+// 유사도 점수 (0~1, 높을수록 유사) - 자모 분해 배열 기준
 function similarityScore(input, target) {
-    const maxLen = Math.max(input.length, target.length);
+    const a = decomposeKorean(input);
+    const b = decomposeKorean(target);
+    const maxLen = Math.max(a.length, b.length);
     if (maxLen === 0) return 1;
-    const dist = levenshteinDistance(input, target);
+    const dist = levenshteinDistance(a, b);
     return 1 - dist / maxLen;
 }
 

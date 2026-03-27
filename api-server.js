@@ -269,11 +269,25 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
-        // MED: 점수 0.5 ~ 0.84 구간 (2~3개 후보 제시) (강제 매핑 금지)
-        if (suggestion.tier === 'MED' && suggestion.candidates.length > 0 && isStockIntent) {
-            console.log(`[API /chat] suggestCandidates MED: "${extracted}" → ${suggestion.candidates.length}개 후보`);
+        // MED / LOW (유사 종목 및 대체 추천 종목 제시)
+        if ((suggestion.tier === 'MED' || suggestion.tier === 'LOW') && isStockIntent) {
+            let candidatesToShow = suggestion.candidates || [];
+            let prefixMsg = `입력하신 "${extracted}"에 해당하는 종목을 정확히 찾지 못했습니다.\n혹시 아래 종목 중 하나를 말씀하신 건가요?\n`;
+
+            // LOW인데 후보조차 0개면 대중적인 인기 종목이라도 강제로 추천 리스트에 포함
+            if (candidatesToShow.length === 0) {
+                prefixMsg = `"${extracted}"와(과) 일치하는 종목이 없습니다.\n대신 많은 분들이 찾는 💡주요 우량 종목을 추천해 드릴게요.\n`;
+                candidatesToShow = [
+                    { ticker: 'NVDA', name: 'NVIDIA', market: 'US', corpCode: null },
+                    { ticker: 'TSLA', name: 'Tesla', market: 'US', corpCode: null },
+                    { ticker: 'AAPL', name: 'Apple', market: 'US', corpCode: null },
+                    { ticker: '005930', name: '삼성전자', market: 'KR', corpCode: '00126380' }
+                ];
+            }
+
+            console.log(`[API /chat] suggestCandidates fallback: "${extracted}" → ${candidatesToShow.length}개 후보 표시`);
             
-            const enrichedCandidates = await Promise.all(suggestion.candidates.slice(0, 3).map(async c => {
+            const enrichedCandidates = await Promise.all(candidatesToShow.slice(0, 4).map(async c => {
                 let price = null, changePct = null;
                 try {
                     const data = await fetchAllStockData(c.ticker, c.name, c.corpCode || null);
@@ -284,13 +298,13 @@ app.post('/api/chat', async (req, res) => {
                 } catch(e) {}
                 
                 const desc = getCompanyDesc(c.ticker) || null;
-                return { ...c, desc, price, changePct };
+                return { ...c, desc, price, changePct, confidence: c.confidence || 0.5 };
             }));
 
-            // 유사도(confidence) 기준 내림차순 정렬 보장
+            // 유사도 내림차순 정렬
             enrichedCandidates.sort((a, b) => b.confidence - a.confidence);
 
-            const contentLines = [`입력하신 "${extracted}"에 해당하는 종목을 정확히 찾지 못했습니다.\n혹시 아래 종목 중 하나를 말씀하신 건가요?\n`];
+            const contentLines = [prefixMsg];
             enrichedCandidates.forEach(c => {
                 const currency = c.ticker.endsWith('.KS') || c.ticker.endsWith('.KQ') ? '₩' : '$';
                 const dStr = c.desc ? ` (${c.desc})` : '';
@@ -306,12 +320,6 @@ app.post('/api/chat', async (req, res) => {
                 content: contentLines.join('\n'),
                 candidates: enrichedCandidates
             });
-            return res.json({ messages });
-        }
-
-        // LOW: 완전히 실패한 경우, 종목 의도가 확실할 때만 에러 반환
-        if (suggestion.tier === 'LOW' && hasStockKeyword(text)) {
-            messages.push({ type: 'text', content: `종목을 찾지 못했습니다. 정확한 이름이나 티커로 다시 입력해주세요.` });
             return res.json({ messages });
         }
 
