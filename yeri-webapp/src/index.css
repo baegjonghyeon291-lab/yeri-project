@@ -83,6 +83,15 @@ a { color: inherit; text-decoration: none; }
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   letter-spacing: -.5px;
 }
+.build-tag {
+  font-size: .55rem; font-weight: 400;
+  background: var(--surface2, #2a2a3a);
+  -webkit-background-clip: unset; -webkit-text-fill-color: unset;
+  color: var(--text-sub, #888);
+  padding: 1px 5px; border-radius: 4px;
+  margin-left: 4px; vertical-align: middle;
+  letter-spacing: 0;
+}
 
 .topbar-nav { display: flex; gap: 4px; margin-left: 12px; }
 .topbar-nav button {

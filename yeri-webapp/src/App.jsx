@@ -2,6 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 
 const API_BASE = '/api'
 
+// Vite 빌드 시점에 주입되는 버전 정보 (vite.config.js define)
+const BUILD_HASH = typeof __BUILD_HASH__ !== 'undefined' ? __BUILD_HASH__ : 'dev'
+const BUILD_TIME = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : ''
+
 // ── 유틸 ──────────────────────────────────────────────────────
 function fmtChange(v) {
   if (v == null) return null
@@ -421,7 +425,7 @@ export default function App() {
     <div className="app">
       {/* 탑바 */}
       <header className="topbar">
-        <span className="topbar-logo">예리 v3 💛</span>
+        <span className="topbar-logo">예리 v3 💛 <span className="build-tag">build:{BUILD_HASH}</span></span>
         <nav className="topbar-nav">
           <button className={page === 'watchlist' ? 'active' : ''} onClick={() => setPage('watchlist')}>
             관심종목

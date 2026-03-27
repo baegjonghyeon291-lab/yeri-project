@@ -70,10 +70,45 @@ app.use(express.json());
 
 // ── 정적 파일 서빙 (웹앱 프론트엔드) ──────────────────────────────
 const webappDist = path.join(__dirname, 'yeri-webapp', 'dist');
-app.use(express.static(webappDist));
+
+// hash 기반 JS/CSS는 1년 캐시 (immutable) — Vite가 파일명에 hash를 넣으므로 안전
+app.use('/assets', express.static(path.join(webappDist, 'assets'), {
+    maxAge: '365d',
+    immutable: true
+}));
+// index.html 등 나머지는 항상 최신 확인 (no-cache)
+app.use(express.static(webappDist, {
+    maxAge: 0,
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        }
+    }
+}));
 
 // Render는 PORT 환경변수를 자동 주입 — API_PORT fallback 유지
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
+
+// ── 배포 버전 확인 엔드포인트 ─────────────────────────────────────
+let deployedHash = 'unknown';
+try {
+    const { execSync } = require('child_process');
+    deployedHash = execSync('git rev-parse --short HEAD').toString().trim();
+} catch { /* Render에서 git 없으면 fallback */ }
+
+app.get('/api/version', (req, res) => {
+    res.json({
+        commitHash: deployedHash,
+        deployedAt: new Date().toISOString(),
+        nodeEnv: process.env.NODE_ENV || 'development',
+        distExists: require('fs').existsSync(webappDist),
+        distFiles: require('fs').existsSync(path.join(webappDist, 'assets'))
+            ? require('fs').readdirSync(path.join(webappDist, 'assets'))
+            : []
+    });
+});
 
 // ── 루트 / 안내 응답 ───────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -482,6 +517,10 @@ app.get('/api/stocks/min-data', async (req, res) => {
 // ── SPA fallback — API 이외 GET 요청은 webapp index.html 서빙 ──
 app.use((req, res) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {
+        // index.html은 항상 최신 버전을 강제로 제공
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
         res.sendFile(path.join(webappDist, 'index.html'));
     } else {
         res.status(404).json({ error: 'Not found' });
