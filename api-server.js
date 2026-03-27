@@ -479,17 +479,101 @@ app.get('/api/alerts/:userId/summary', async (req, res) => {
 
 
 // ── 유사 종목 추천 엔드포인트 ───────────────────────────────────────
-// GET /api/suggest?q=엔비디어  → 후보 3~5개 + confidence 반환
-app.get('/api/suggest', (req, res) => {
+// GET /api/suggest?q=엔비디어  → 후보 3~5개 + confidence + exchange + currentPrice 반환
+app.get('/api/suggest', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json({ ok: false, error: 'q 파라미터 필요' });
     try {
-        const result = suggestCandidates(q);
-        res.json({ ok: true, ...result });
+        // 1단계: 로컬 사전 검색 (즉시, ~0ms)
+        const localResult = suggestCandidates(q);
+
+        // 로컬 사전에서 HIGH 매칭이면 즉시 반환 (빠른 응답)
+        if (localResult.tier === 'HIGH' && localResult.candidates.length > 0) {
+            const enriched = await enrichCandidatesWithPrice(localResult.candidates.slice(0, 3));
+            return res.json({ ok: true, ...localResult, candidates: enriched });
+        }
+
+        // 2단계: 실제 API 검색 (Finnhub → Polygon → Yahoo, ~1-3초)
+        let apiCandidates = [];
+        try {
+            const apiResult = await searchTicker(q);
+            if (apiResult.found && apiResult.candidates?.length > 0) {
+                apiCandidates = apiResult.candidates.map(c => ({
+                    ticker: c.ticker,
+                    name: c.name,
+                    market: (c.ticker || '').includes('.KS') || (c.ticker || '').includes('.KQ') ? 'KR' : 'US',
+                    exchange: c.exchange || c.source || null,
+                    confidence: c.confidence ?? 0.7,
+                }));
+            }
+        } catch (apiErr) {
+            console.warn(`[/api/suggest] API fallback 실패: ${apiErr.message}`);
+        }
+
+        // 3단계: 로컬 + API 결과 병합
+        const merged = mergeSuggestResults(localResult, apiCandidates);
+
+        // 4단계: 상위 후보에 currentPrice 보강
+        merged.candidates = await enrichCandidatesWithPrice(merged.candidates.slice(0, 5));
+
+        res.json({ ok: true, ...merged });
     } catch (e) {
+        console.error(`[/api/suggest] 에러:`, e);
         res.status(500).json({ ok: false, error: e.message });
     }
 });
+
+// ── 검색 결과 병합 헬퍼 ──────────────────────────────────────────────
+function mergeSuggestResults(localResult, apiCandidates) {
+    const seen = new Set((localResult.candidates || []).map(c => c.ticker));
+    const newFromApi = (apiCandidates || []).filter(c => !seen.has(c.ticker));
+    const allCandidates = [...(localResult.candidates || []), ...newFromApi].slice(0, 5);
+
+    if (!allCandidates.length) {
+        return { input: localResult.input, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
+    }
+
+    const bestConf = Math.max(...allCandidates.map(c => c.confidence || 0));
+    const tier = bestConf >= 0.85 ? 'HIGH' : bestConf >= 0.5 ? 'MED' : 'LOW';
+    const best = allCandidates[0];
+
+    return {
+        input: localResult.input,
+        resolved: tier === 'HIGH' ? { ticker: best.ticker, name: best.name, market: best.market } : null,
+        confidence: bestConf,
+        tier,
+        candidates: allCandidates.map(c => ({
+            ...c,
+            tier: (c.confidence || 0) >= 0.85 ? 'HIGH' : (c.confidence || 0) >= 0.5 ? 'MED' : 'LOW',
+        })),
+    };
+}
+
+// ── 후보에 currentPrice 보강 (병렬, 3초 타임아웃) ─────────────────
+async function enrichCandidatesWithPrice(candidates) {
+    if (!candidates || !candidates.length) return [];
+    try {
+        const enriched = await Promise.all(candidates.map(async (c) => {
+            try {
+                const priceData = await Promise.race([
+                    fetchAllStockData(c.ticker),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000)),
+                ]);
+                return {
+                    ...c,
+                    exchange: c.exchange || priceData?.price?.source || null,
+                    currentPrice: priceData?.price?.current ?? null,
+                    changePct: priceData?.price?.changePct ?? null,
+                };
+            } catch {
+                return { ...c, currentPrice: null, changePct: null };
+            }
+        }));
+        return enriched;
+    } catch {
+        return candidates;
+    }
+}
 
 // ── 종목 멀티 가격 조회 (포트폴리오용) ─────────────────────────────
 // GET /api/stocks/min-data?tickers=AAPL,TSLA
