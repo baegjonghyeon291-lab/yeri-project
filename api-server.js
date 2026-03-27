@@ -575,7 +575,60 @@ async function enrichCandidatesWithPrice(candidates) {
     }
 }
 
-// ── 종목 멀티 가격 조회 (포트폴리오용) ─────────────────────────────
+// ── 종목 상세 분석용 통합 데이터 엔드포인트 ─────────────────────────
+// GET /api/stock/:ticker
+app.get('/api/stock/:ticker', async (req, res) => {
+    let ticker = (req.params.ticker || '').trim().toUpperCase();
+    if (!ticker) return res.status(400).json({ ok: false, error: 'ticker 파라미터 필요' });
+
+    try {
+        // 로컬 티커 리졸버 (아이온큐 -> IONQ 등) 통과
+        const resolved = resolveStock(ticker);
+        if (resolved) {
+            ticker = resolved.ticker;
+        }
+
+        const data = await fetchAllStockData(ticker, resolved?.name, resolved?.corpCode);
+        
+        // 반환 구조 매핑 (null 안전 처리)
+        res.json({
+            ok: true,
+            ticker: data.ticker,
+            name: data.companyName,
+            price: {
+                current: data.price?.current ?? null,
+                changePct: data.price?.changePct ?? null,
+                open: data.price?.open ?? null,
+                high: data.price?.high ?? null,
+                low: data.price?.low ?? null,
+                prevClose: data.price?.prevClose ?? null,
+                volume: data.price?.volume ?? null,
+            },
+            fundamentals: {
+                marketCap: data.fundamentals?.mktCap ?? null,
+                peRatio: data.fundamentals?.peRatio ?? null,
+                pbRatio: data.fundamentals?.pbRatio ?? null,
+                eps: data.fundamentals?.eps ?? null,
+                revenue: data.fundamentals?.revenue ?? null,
+            },
+            chart: {
+                change1W: data.history?.change1W ?? null,
+                change1M: data.history?.change1M ?? null,
+                history: data.history?.closes || [],
+            },
+            news: (data.news || []).slice(0, 5).map(n => ({
+                title: n.title,
+                source: n.source,
+                publishedAt: n.publishedAt,
+                url: n.url
+            })),
+            metadata: data.metadata || {}
+        });
+    } catch (e) {
+        console.error(`[/api/stock/:ticker] 에러:`, e);
+        res.status(500).json({ ok: false, error: e.message });
+    }
+});
 // GET /api/stocks/min-data?tickers=AAPL,TSLA
 app.get('/api/stocks/min-data', async (req, res) => {
     const tickersRaw = req.query.tickers || '';

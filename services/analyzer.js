@@ -223,6 +223,10 @@ function generateDataReport(data, mode = 'full') {
             lines.push(`**52주 내 위치:** ${pctOf52}% (0%=최저점, 100%=최고점)`);
         }
     }
+    const h = data.history || {};
+    if (h.change1W != null || h.change1M != null) {
+        lines.push(`**기간별 변동:** 1주 ${h.change1W != null ? h.change1W + '%' : 'N/A'} | 1개월 ${h.change1M != null ? h.change1M + '%' : 'N/A'}`);
+    }
 
     // 기술적 지표
     lines.push('');
