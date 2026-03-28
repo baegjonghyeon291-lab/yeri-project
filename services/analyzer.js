@@ -684,7 +684,7 @@ function buildVerifiedContext(data) {
     for (const [k, v] of Object.entries(cleaned)) {
         if (v._removed || v.value == null) continue;
         const val = typeof v.value === 'object' ? JSON.stringify(v.value) : v.value;
-        lines.push(`${k}: ${val} (source: ${v.source})`);
+        lines.push(`${k}: ${val} (출처: ${v.source})`);
     }
     if (warnings.length > 0) {
         lines.push(`\n[⚠️ Validation 경고]`);
@@ -716,8 +716,10 @@ function buildVerifiedContext(data) {
     const metricCount = Object.values(cleaned).filter(v => !v._removed && v.value != null).length;
     const totalMetrics = Object.keys(cleaned).length;
     const hasMultiSrc = new Set(Object.values(cleaned).filter(v => v.source).map(v => v.source)).size > 1;
-    lines.push(`\n[검증 상태 (4항목)]`);
-    lines.push(`원천 데이터 신뢰도: ${hasMultiSrc ? '복수 소스 확보' : '단일 소스'} — 확보 ${metricCount}/${totalMetrics}개`);
+    lines.push(`\n[검증 상태 (5항목)]`);
+    lines.push(`원천 데이터 신뢰도: ${hasMultiSrc ? '복수 소스 확보' : '단일 소스'}`);
+    const coverageLevel = metricCount >= totalMetrics * 0.8 ? '높음' : (metricCount >= totalMetrics * 0.5 ? '보통' : '낮음');
+    lines.push(`분석 커버리지: ${coverageLevel} (${totalMetrics}개 중 ${metricCount}개 확보)`);
     lines.push(`해석 신뢰도: 낮음 (LLM 기반 해석이므로 검증 필요)`);
     lines.push(`기간 일치성: ${warnings.some(w => w.includes('상이')) ? '불일치 가능' : '확인 불가'}`);
     lines.push(`뉴스 신뢰도: ${classifiedNews.some(cn => cn.trust === '공식발표') ? '일부 공식발표 포함' : '전체 언론보도 기반'}`);
@@ -757,19 +759,19 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 # 📊 [종목명] 분석 리포트
 
 ## 🎯 한줄 요약
-(핵심 축 2개만 선택하여 보수적 표현으로 1문장. 예: "밸류에이션 부담과 단기 모멘텀 약화에 유의 필요")
+(핵심 축 2개만 선택하여 보수적이고 자연스러운 문장으로 작성. 예: "FCF 음수 지속"(X) → "음수 현금흐름 부담"(O), "실적 성장성 기대됨"(X) → "실적 기반의 성장 동력 보유"(O))
 
 ## 📋 핵심 팩트 (해석 없이 수치만)
-| 항목 | 값 | 출처(source) |
+| 항목 | 값 | 출처 |
 |------|------|------|
-| 현재가 | (<RawData>의 값) | (<RawData>의 source) |
-| 전일비 | (<RawData>의 값)% | (<RawData>의 source) |
-| PER | (값 또는 데이터 부족) | (source) |
-| EPS | (값 또는 데이터 부족) | (source) |
-| ROE | (값 또는 데이터 부족) | (source) |
-| D/E | (값 또는 데이터 부족) | (source) |
-| FCF | (값 또는 데이터 부족) | (source) |
-| RSI(14) | (값 또는 데이터 부족) | (source) |
+| 현재가 | (<RawData>의 값) | (<RawData>의 출처 표시) |
+| 전일비 | (<RawData>의 값)% | (<RawData>의 출처 표시) |
+| PER | (값 또는 데이터 부족) | (출처) |
+| EPS | (값 또는 데이터 부족) | (출처) |
+| ROE | (값 또는 데이터 부족) | (출처) |
+| D/E | (값 또는 데이터 부족) | (출처) |
+| FCF | (값 또는 데이터 부족) | (출처) |
+| RSI(14) | (값 또는 데이터 부족) | (출처) |
 
 ## 📈 상승 가능성 요인
 1. [실적/재무] (근거 수치 + 출처) — ⚠️ 제한: (한계점)
@@ -783,12 +785,13 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 
 ## 📰 뉴스 심리 분석
 <RawData>의 뉴스 분류 결과를 인용.
-- 대표 긍정 뉴스 1건: (제목, 유형, 신뢰도)
-- 대표 부정 뉴스 1건: (제목, 유형, 신뢰도)
+- 대표 긍정 뉴스: (한국어 1줄 요약) — (출처)
+- 대표 부정 뉴스: (한국어 1줄 요약) — (출처)
 → 종합 심리: (긍정/부정/중립) + 왜 이 판단인지 1줄 근거
+(* 영어 원문 제목은 제외하거나 생략)
 
 ## 💯 6대 부문 점수 (0~100점)
-⚠️ <RawData>의 산식 요약을 그대로 인용. 직접 점수 생성 금지.
+⚠️ 점수는 수집된 원천 데이터 기준으로 계산되었습니다.
 - 🚀 **성장성**: [점수]점 — [산식 요약 인용]
 - 💰 **수익성**: [점수]점 — [산식 요약 인용]
 - 🛡️ **재무안정성**: [점수]점 — [산식 요약 인용]
@@ -810,21 +813,21 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 - **💡 동종 업계 관심 종목**: (같은 섹터 2~3개 + 한 줄 비교)
 
 ## 🔍 검증 상태
-- **원천 데이터 신뢰도**: (<RawData>의 검증 상태 인용)
+- **원천 데이터 신뢰도**: (<RawData>의 표기 인용)
+- **분석 커버리지**: (<RawData>의 분석 커버리지 구조 그대로 인용. 예: 높음 (26개 중 25개 확보))
 - **해석 신뢰도**: 낮음 (LLM 기반 해석이므로 독립 검증 필요)
 - **기간 일치성**: (<RawData>의 기간 일치성 인용)
 - **뉴스 신뢰도**: (<RawData>의 뉴스 신뢰도 인용)
-- **분석 커버리지**: 확보 [N]개 / 미확보 [N]개 항목
 - ⚠️ 본 분석은 API 데이터 기반 자동 생성이며, 투자 결정의 근거가 아닙니다. 전문가 상담 및 추가 검증을 권장합니다.
 
 ## 🛒 매수/매도 참고
 ⚠️ 아래는 투자 권유가 아닌 조건형 참고 의견입니다.
-- **매수 검토 조건**: (EMA/SMA 지지선 근접, 거래량 증가, RSI 과매도 회복 등 <RawData> 기반 조건 나열. 구체 가격은 <RawData>에 근거가 있을 때만 출력. 없으면 "가격 수준 판단 근거 부족"으로 조건만 서술)
-- **매도 검토 조건**: (저항선 도달, 지지선 이탈, 실적 악화 신호, 뉴스 악화 등 <RawData> 기반 조건 나열. 구체 가격은 <RawData>에 근거가 있을 때만 출력)
-- ⚠️ "지금 사라/팔아라" 같은 직접 권유 표현 절대 금지. 항상 "~조건 충족 시 검토 가능", "~이탈 시 유의 필요" 형태로만 서술.
+- **매수 검토 조건**: 1~2줄 이내로 서술 (가격 근거는 괄호로 짧게. 예: 지지선 도달 시(EMA20 $40.92))
+- **매도/주의 조건**: 1~2줄 이내로 서술 (조건 구체화 및 괄호로 가격 근거 표시)
+- ⚠️ 직접 권유 금지. 항상 조건형으로 서술.
 
 ## 🤖 AI 참고 의견
-(2~3문장 이내. 확률형/보수적 표현만 사용. 예: "현재 데이터 기준 관망이 우세한 것으로 해석됨", "조건 충족 시 분할 접근을 검토해볼 수 있음", "변동성 구간에 유의 필요")
+(행동 원칙 중심으로 2~3문장 이내 작성. 종합 판단 반복 피하기. 예: "추격 매수보다 관망이 우세합니다.", "매수 조건 충족 시 분할 접근을 검토해볼 수 있습니다.")
 ⚠️ 단정형 투자 권유 금지. 본 의견은 API 데이터 기반 자동 생성이며 참고용입니다.
 `;
 
