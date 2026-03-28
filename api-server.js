@@ -43,7 +43,8 @@ const {
     analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual,
     analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison,
     analyzeETF, analyzePortfolio, analyzeRecommendation,
-    analyzeMarket, analyzeSector, classifyQuery, fallbackChat, computeScore
+    analyzeMarket, analyzeSector, classifyQuery, fallbackChat, computeScore,
+    normalizeData, validateData, computeScore6, classifyNewsItems
 } = require('./services/analyzer');
 const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability } = require('./services/data-fetcher');
 const {
@@ -266,16 +267,50 @@ app.post('/api/chat', async (req, res) => {
 
             // UI 렌더링용 구조화 데이터
             const score = computeScore(data);
+            // 6대 점수 + 정규화 데이터
+            const normalized = normalizeData(data);
+            const { cleaned, warnings } = validateData(normalized, data);
+            const newsAn = { positive: [], negative: [], neutral: [], total: 0 };
+            if (data.news?.length) {
+                const pk = ['beat','surge','growth','buy','upgrade','profit','rally','bullish'];
+                const nk = ['miss','fall','drop','downgrade','sell','loss','cut','bearish'];
+                for (const n of data.news.slice(0, 8)) {
+                    const t = (n.title||'').toLowerCase();
+                    const p = pk.filter(k => t.includes(k)).length;
+                    const ng = nk.filter(k => t.includes(k)).length;
+                    newsAn.total++;
+                    if (p > ng) newsAn.positive.push(n);
+                    else if (ng > p) newsAn.negative.push(n);
+                    else newsAn.neutral.push(n);
+                }
+            }
+            const s6 = computeScore6(cleaned, newsAn);
+            const newsClassified = classifyNewsItems(data.news);
+
+            // 핵심 지표 추출 (프론트 카드 UI용)
+            const metrics = {};
+            for (const [k, v] of Object.entries(cleaned)) {
+                if (v._removed || v.value == null) continue;
+                if (typeof v.value === 'object' && k === 'macd') continue;
+                metrics[k] = { value: v.value, source: v.source };
+            }
+
             const analysisData = {
                 verdict: score.verdict,
                 action: score.action,
-                totalScore: score.normalized !== null ? score.normalized * 10 : 0,
+                totalScore: s6.overall || (score.normalized !== null ? score.normalized * 10 : 0),
                 scores: {
-                    growth: score.growthScore !== null ? score.growthScore * 50 : 0, // 0~2 -> 0~100
-                    stability: ((score.roeScore || 0) + (score.fcfScore || 0)) * 25, // 0~4 -> 0~100
-                    momentum: ((score.rsiScore || 0) + (score.perScore || 0)) * 25   // 0~4 -> 0~100
+                    growth: s6.growth,
+                    profitability: s6.profitability,
+                    stability: s6.stability,
+                    valuation: s6.valuation,
+                    momentum: s6.momentum,
+                    newsSentiment: s6.newsSentiment,
                 },
-                peers: null // 프론트엔드에서 MD 파싱 보완
+                metrics,
+                newsClassified: newsClassified.slice(0, 5),
+                warnings,
+                peers: null
             };
 
             const expectedQuestions = [`${name || ticker} 왜 오를까?`, `${name || ticker} 왜 내릴까?`, `${name || ticker} 경쟁사와 비교해줘`];
