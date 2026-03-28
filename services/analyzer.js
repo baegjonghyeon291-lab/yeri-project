@@ -577,12 +577,36 @@ function computeScore6(cleaned, newsAnalysis) {
         newsSentiment = Math.max(10, Math.min(90, newsSentiment));
     }
 
+    // ── 산식 요약 (각 점수의 가점/감점 방향) ──
+    const reasons = {};
+    if (gv != null) reasons.growth = `매출성장률 ${gv > 0 ? '+' : ''}${gv.toFixed(1)}% → ${gv > 10 ? '가점' : gv > 0 ? '소폭 가점' : '감점'}`;
+    if (rv != null || nm != null) {
+        const parts = [];
+        if (rv != null) parts.push(`ROE ${rv.toFixed(1)}%${rv > 15 ? '(양호)' : rv > 0 ? '(보통)' : '(저조)'}`);
+        if (nm != null) parts.push(`순이익률 ${nm.toFixed(1)}%${nm > 10 ? '(양호)' : nm > 0 ? '(보통)' : '(적자)'}`);
+        reasons.profitability = parts.join(', ');
+    }
+    if (dev != null || fcfv != null) {
+        const parts = [];
+        if (dev != null) parts.push(`D/E ${dev.toFixed(0)}%${dev > 100 ? '(높음→감점)' : '(양호)'}`);
+        if (fcfv != null) parts.push(`FCF ${fcfv > 0 ? '양수(+)' : '음수(−)→감점'}`);
+        reasons.stability = parts.join(', ');
+    }
+    if (pev != null || pbv != null) {
+        const parts = [];
+        if (pev != null) parts.push(`PER ${pev.toFixed(1)}${pev > 35 ? '(부담→감점)' : pev < 15 ? '(저평가→가점)' : '(적정)'}`);
+        if (pbv != null) parts.push(`PBR ${pbv.toFixed(1)}${pbv > 3 ? '(부담)' : pbv < 1 ? '(저평가→가점)' : ''}`);
+        reasons.valuation = parts.join(', ');
+    }
+    if (rsiv != null) reasons.momentum = `RSI ${rsiv.toFixed(1)}${rsiv < 30 ? '(과매도→반등 가능성)' : rsiv > 70 ? '(과매수→조정 유의)' : '(중립 구간)'}(보조지표)`;
+    if (newsSentiment != null) reasons.newsSentiment = `긍정 ${newsAnalysis.positive.length}건 / 부정 ${newsAnalysis.negative.length}건 / 총 ${newsAnalysis.total}건`;
+
     // ── 종합 (null 제외 평균) ──
     const all = [growth, profitability, stability, valuation, momentum, newsSentiment];
     const valid = all.filter(v => v !== null);
     const overall = valid.length > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
 
-    return { growth, profitability, stability, valuation, momentum, newsSentiment, overall };
+    return { growth, profitability, stability, valuation, momentum, newsSentiment, overall, reasons };
 }
 
 // ══════════════════════════════════════════════════════════
@@ -666,13 +690,14 @@ function buildVerifiedContext(data) {
         lines.push(`\n[⚠️ Validation 경고]`);
         warnings.forEach(w => lines.push(w));
     }
-    lines.push(`\n[6대 부문 룰기반 점수 (0~100)]`);
-    lines.push(`성장성: ${score6.growth ?? '데이터 부족'}`);
-    lines.push(`수익성: ${score6.profitability ?? '데이터 부족'}`);
-    lines.push(`재무안정성: ${score6.stability ?? '데이터 부족'}`);
-    lines.push(`밸류에이션: ${score6.valuation ?? '데이터 부족'}`);
-    lines.push(`모멘텀: ${score6.momentum ?? '데이터 부족'} (보조지표 기반, 참고용)`);
-    lines.push(`뉴스심리: ${score6.newsSentiment ?? '데이터 부족'}`);
+    const r = score6.reasons || {};
+    lines.push(`\n[6대 부문 룰기반 점수 (0~100) — 산식 요약 포함]`);
+    lines.push(`성장성: ${score6.growth ?? '데이터 부족'}${r.growth ? ' — ' + r.growth : ''}`);
+    lines.push(`수익성: ${score6.profitability ?? '데이터 부족'}${r.profitability ? ' — ' + r.profitability : ''}`);
+    lines.push(`재무안정성: ${score6.stability ?? '데이터 부족'}${r.stability ? ' — ' + r.stability : ''}`);
+    lines.push(`밸류에이션: ${score6.valuation ?? '데이터 부족'}${r.valuation ? ' — ' + r.valuation : ''}`);
+    lines.push(`모멘텀: ${score6.momentum ?? '데이터 부족'}${r.momentum ? ' — ' + r.momentum : ''} (보조지표, 참고용)`);
+    lines.push(`뉴스심리: ${score6.newsSentiment ?? '데이터 부족'}${r.newsSentiment ? ' — ' + r.newsSentiment : ''}`);
     lines.push(`종합: ${score6.overall ?? '데이터 부족'}`);
 
     if (classifiedNews.length > 0) {
@@ -680,7 +705,22 @@ function buildVerifiedContext(data) {
         classifiedNews.forEach(cn => {
             lines.push(`- [${cn.type}] ${cn.title} | 강도:${cn.strength} | 신뢰도:${cn.trust} | 지속성:${cn.duration}`);
         });
+        // 대표 긍정/부정 뉴스
+        const posNews = classifiedNews.find(cn => ['실적','업황','이벤트'].includes(cn.type) && cn.strength !== '약');
+        const negNews = classifiedNews.find(cn => cn.strength === '강' || cn.type === '정책');
+        if (posNews) lines.push(`대표 긍정 뉴스: ${posNews.title} (${posNews.type}, ${posNews.trust})`);
+        if (negNews && negNews !== posNews) lines.push(`대표 부정 뉴스: ${negNews.title} (${negNews.type}, ${negNews.trust})`);
     }
+
+    // 검증 상태 4항목 분리
+    const metricCount = Object.values(cleaned).filter(v => !v._removed && v.value != null).length;
+    const totalMetrics = Object.keys(cleaned).length;
+    const hasMultiSrc = new Set(Object.values(cleaned).filter(v => v.source).map(v => v.source)).size > 1;
+    lines.push(`\n[검증 상태 (4항목)]`);
+    lines.push(`원천 데이터 신뢰도: ${hasMultiSrc ? '복수 소스 확보' : '단일 소스'} — 확보 ${metricCount}/${totalMetrics}개`);
+    lines.push(`해석 신뢰도: 낮음 (LLM 기반 해석이므로 검증 필요)`);
+    lines.push(`기간 일치성: ${warnings.some(w => w.includes('상이')) ? '불일치 가능' : '확인 불가'}`);
+    lines.push(`뉴스 신뢰도: ${classifiedNews.some(cn => cn.trust === '공식발표') ? '일부 공식발표 포함' : '전체 언론보도 기반'}`);
 
     return lines.join('\n');
 }
@@ -695,86 +735,87 @@ function buildContextForLLM(data) {
     return `<RawData>\n${rawReport}\n\n[검증 데이터 및 룰기반 점수]\n${verifiedContext}\n${newsContext}\n</RawData>`;
 }
 
-const STOCK_PROMPT_TEMPLATE = `당신은 최고 수준의 데이터 기반 투자 애널리스트 "예리"입니다.
-제공된 <RawData>를 바탕으로 반드시 다음 마크다운 구조를 '정확히' 지켜서 분석 리포트를 작성하세요.
+const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "예리"입니다.
+제공된 <RawData>를 바탕으로 반드시 아래 마크다운 구조를 정확히 지켜 분석 참고자료를 작성하세요.
 
 [🚨 핵심 규칙 — 반드시 준수]
-1. 오직 <RawData> 수치만 사용. 없는 정보는 절대 추론/추정/생성 금지. "데이터 부족"으로 표시.
-2. source 없는 수치는 출력 금지: <RawData>에 source가 명시된 수치만 사용 가능. source 필드가 없거나 "없음"인 항목은 결과에서 제외.
-3. period(기준기간) 추론 금지: <RawData>에 period 정보가 없으면 "TTM", "연간", "분기" 등의 기준기간을 절대 추측하지 마세요. 표시하지 않거나 필요 시 "기준기간 미제공"으로만 처리.
-4. asOfDate(기준일) 추론 금지: <RawData>에 날짜 정보가 없으면 날짜를 절대 만들어내지 마세요. 표시하지 않거나 필요 시 "기준일 미제공"으로만 처리.
-5. 수치 인용 시 <RawData>에 실제 존재하는 필드만 표기. 예: "PER 25.3 (Finnhub)" — source만 있으므로 source만 괄호에 쓸 것.
-6. 재무 지표와 기술 지표는 데이터 산출 기간이 서로 다를 수 있음 → 한 문장에 함께 쓸 때 "※ 데이터 기간이 상이할 수 있음" 단서 필수.
-7. 팩트와 해석 분리: 숫자 하나로 단정 결론 금지. "PER 40 → 고평가"(X) → "PER 40으로 업종 평균 대비 높은 편이며, 고평가 가능성이 있음"(O)
-8. RSI, MACD 등 기술지표는 보조지표로만 사용. 저평가/고평가 결론의 직접 근거로 연결 금지.
-9. 핵심 지표가 2개 이상 소스에서 제공될 경우, 값 차이가 크면 "⚠️ 데이터 기준 차이 존재" 경고 표기.
-10. 최종 문장은 확정형("~이다") 대신 확률형("~가능성이 높다", "~으로 판단된다") 표현 사용.
-11. 점수는 <RawData>의 "점수 상세" 섹션 값을 그대로 인용. 직접 점수를 만들지 말 것.
-12. 길이 제한: 간결하고 핵심만. 불필요한 인사말/부연 금지.
+1. 오직 <RawData> 수치만 사용. 없는 정보는 "데이터 부족"으로 표시. 추론/추정 금지.
+2. source 없는 수치는 출력 금지.
+3. period/asOfDate 추론 금지. 없으면 표시하지 않거나 "미제공".
+4. 표현 강도 제한: "~가능성이 높다"(X) → "~유의 필요", "~가능성 존재", "~해석될 수 있음" 수준으로 보수적 서술.
+5. 한줄 요약은 핵심 축 최대 2개만 사용. 여러 지표를 한 문장에 나열하지 말 것.
+6. 지지선/저항선/목표가 등 가격 수준을 언급할 때 반드시 산출 근거를 명시.
+   - 허용 근거: EMA20/EMA50/SMA200, 전일 고저가, 최근 N일 고저점, 피벗포인트
+   - <RawData>에 해당 값이 없으면 가격 수준 언급 금지.
+   - 예: "EMA20 $40.92 (TwelveData) 부근이 단기 지지선으로 해석될 수 있음"
+7. 팩트와 해석 분리. 숫자 하나로 단정 금지.
+8. RSI/MACD 등 기술지표는 보조 참고. 고평가/저평가 직접 근거 금지.
+9. 재무+기술 혼용 시 "데이터 기간 상이 가능" 단서 필수.
+10. 6대 점수는 <RawData>의 산식 요약을 그대로 인용. 직접 점수 생성 금지.
+11. 길이 제한: 간결하고 핵심만.
 
 # 📊 [종목명] 분석 리포트
 
 ## 🎯 한줄 요약
-(이 종목의 현재 상태를 확률형 표현으로 한 줄 요약)
+(핵심 축 2개만 선택하여 보수적 표현으로 1문장. 예: "밸류에이션 부담과 단기 모멘텀 약화에 유의 필요")
 
 ## 📋 핵심 팩트 (해석 없이 수치만)
 | 항목 | 값 | 출처(source) |
 |------|------|------|
 | 현재가 | (<RawData>의 값) | (<RawData>의 source) |
 | 전일비 | (<RawData>의 값)% | (<RawData>의 source) |
-| PER | (<RawData>의 값 또는 데이터 부족) | (<RawData>의 source) |
-| EPS | (<RawData>의 값 또는 데이터 부족) | (<RawData>의 source) |
-| ROE | (<RawData>의 값 또는 데이터 부족) | (<RawData>의 source) |
-| D/E | (<RawData>의 값 또는 데이터 부족) | (<RawData>의 source) |
-| FCF | (<RawData>의 값 또는 데이터 부족) | (<RawData>의 source) |
-| RSI(14) | (<RawData>의 값 또는 데이터 부족) | (<RawData>의 source) |
-⚠️ "출처" 칸은 반드시 <RawData>에 표기된 source 값만 사용. 없으면 비워두세요.
-⚠️ 2개 이상 소스에서 같은 지표의 값이 다르면 "데이터 기준 차이 존재" 경고 표시
+| PER | (값 또는 데이터 부족) | (source) |
+| EPS | (값 또는 데이터 부족) | (source) |
+| ROE | (값 또는 데이터 부족) | (source) |
+| D/E | (값 또는 데이터 부족) | (source) |
+| FCF | (값 또는 데이터 부족) | (source) |
+| RSI(14) | (값 또는 데이터 부족) | (source) |
 
 ## 📈 상승 가능성 요인
-1. [실적/재무] (근거 수치 + 출처 인용) — ⚠️ 제한: (이 해석의 한계점)
-2. [뉴스/재료] (핵심 내용) — ⚠️ 제한: (뉴스 신뢰도/지속성 평가)
-3. [차트/수급] (근거 수치 + 출처 인용, 보조지표임을 명시) — ⚠️ 제한: (기술지표의 한계)
+1. [실적/재무] (근거 수치 + 출처) — ⚠️ 제한: (한계점)
+2. [뉴스/재료] (내용) — ⚠️ 제한: (신뢰도/지속성)
+3. [차트/수급] (근거 + 출처, 보조지표 명시) — ⚠️ 제한: (기술지표 한계)
 
 ## 📉 하락 리스크 요인
-1. [실적/재무] (근거 수치 + 출처 인용) — ⚠️ 제한: (이 해석의 한계점)
-2. [뉴스/재료] (핵심 악재) — ⚠️ 제한: (뉴스 신뢰도/지속성 평가)
-3. [차트/수급] (근거 수치 + 출처 인용, 보조지표임을 명시) — ⚠️ 제한: (기술지표의 한계)
+1. [실적/재무] (근거 수치 + 출처) — ⚠️ 제한: (한계점)
+2. [뉴스/재료] (악재) — ⚠️ 제한: (신뢰도/지속성)
+3. [차트/수급] (근거 + 출처, 보조지표 명시) — ⚠️ 제한: (기술지표 한계)
 
 ## 📰 뉴스 심리 분석
-각 뉴스를 아래 4가지로 분류:
-- **유형**: 실적/정책/수급/업황/이벤트
-- **강도**: 강/중/약
-- **신뢰도**: 공식발표/언론보도/루머
-- **지속성**: 일시적/단기(1주)/중기(1개월+)
-→ 종합 심리: (긍정/부정/중립) + 근거 1줄
+<RawData>의 뉴스 분류 결과를 인용.
+- 대표 긍정 뉴스 1건: (제목, 유형, 신뢰도)
+- 대표 부정 뉴스 1건: (제목, 유형, 신뢰도)
+→ 종합 심리: (긍정/부정/중립) + 왜 이 판단인지 1줄 근거
 
 ## 💯 6대 부문 점수 (0~100점)
-⚠️ <RawData>의 "점수 상세" 섹션에 계산된 값 기반으로 인용. 직접 만들지 마세요.
-- 🚀 **성장성**: [점수]점 — 근거: (매출성장률, EPS 추이 등 <RawData> 인용)
-- 💰 **수익성**: [점수]점 — 근거: (ROE, 순이익률 등 <RawData> 인용)
-- 🛡️ **재무안정성**: [점수]점 — 근거: (D/E, FCF, 부채비율 등 <RawData> 인용)
-- 📊 **밸류에이션**: [점수]점 — 근거: (PER, PBR 등 <RawData> 인용)
-- 🏄 **모멘텀**: [점수]점 — 근거: (RSI, EMA 등 <RawData> 인용, 보조지표 한정)
-- 📰 **뉴스심리**: [점수]점 — 근거: (뉴스 긍/부정 비율 등)
+⚠️ <RawData>의 산식 요약을 그대로 인용. 직접 점수 생성 금지.
+- 🚀 **성장성**: [점수]점 — [산식 요약 인용]
+- 💰 **수익성**: [점수]점 — [산식 요약 인용]
+- 🛡️ **재무안정성**: [점수]점 — [산식 요약 인용]
+- 📊 **밸류에이션**: [점수]점 — [산식 요약 인용]
+- 🏄 **모멘텀**: [점수]점 — [산식 요약 인용] (보조지표 한정)
+- 📰 **뉴스심리**: [점수]점 — [산식 요약 인용]
 - 🏆 **종합**: [평균]점
 
 ## ⚠️ 해석 주의사항
-- (서로 다른 기간 데이터가 섞인 경우 명시)
-- (기술지표는 보조 참고용이며 투자 결정의 직접 근거가 아님)
-- (데이터 부족 항목이 있는 경우 분석 정확도 제한 명시)
+- (기간 혼용 여부)
+- (기술지표는 보조 참고용)
+- (데이터 부족 항목으로 정확도 제한)
 
 ## 💡 종합 판단
-- **🚀 한줄 액션**: (확률형 표현으로 작성)
-- **🎯 핵심 액션**: [매수 고려 / 관망 권장 / 리스크 주의] 중 택 1 + 이유 1~2줄 (확률형)
-- **⏱️ 진입 타이밍**: (확률형 가이드)
+- **🚀 한줄 액션**: (보수적 표현: "~유의 필요", "~검토 가능", "~고려해볼 수 있음")
+- **🎯 핵심 액션**: [관망 권장 / 보수적 접근 / 분할 검토 가능 / 리스크 주의] 택 1 + 이유 1~2줄
+- **⏱️ 진입 타이밍**: (<RawData>의 EMA/SMA 기반 가격 수준만 인용. 없으면 "판단 근거 부족")
 - **🔭 목표 관점**: 단기 (1주~1개월) / 중기 (3~6개월)
 - **💡 동종 업계 관심 종목**: (같은 섹터 2~3개 + 한 줄 비교)
 
 ## 🔍 검증 상태
-- **데이터 신뢰도**: [높음/중간/낮음] — (<RawData>의 신뢰도 값 인용)
+- **원천 데이터 신뢰도**: (<RawData>의 검증 상태 인용)
+- **해석 신뢰도**: 낮음 (LLM 기반 해석이므로 독립 검증 필요)
+- **기간 일치성**: (<RawData>의 기간 일치성 인용)
+- **뉴스 신뢰도**: (<RawData>의 뉴스 신뢰도 인용)
 - **분석 커버리지**: 확보 [N]개 / 미확보 [N]개 항목
-- ⚠️ 본 분석은 API 기반 자동 생성이며, 투자 결정 전 반드시 전문가 상담 및 추가 검증을 권장합니다.
+- ⚠️ 본 분석은 API 데이터 기반 자동 생성이며, 투자 결정의 근거가 아닙니다. 전문가 상담 및 추가 검증을 권장합니다.
 `;
 
 async function analyzeStock(data, useDeep = false, tone = 'normal') {

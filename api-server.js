@@ -308,6 +308,7 @@ app.post('/api/chat', async (req, res) => {
                     newsSentiment: s6.newsSentiment,
                 },
                 metrics,
+                scoreReasons: s6.reasons || {},
                 newsClassified: newsClassified.slice(0, 5),
                 warnings,
                 peers: null
