@@ -389,14 +389,310 @@ function generateDataReport(data, mode = 'full') {
 // GPT 기반 개별 종목 분석 (AnalyzeStock 시리즈)
 // ══════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════
+// [신규] 1. 정규화 데이터 객체 생성 — normalizeData()
+// 각 지표를 { value, source, period, asOfDate } 형태로 통합
+// 없는 값은 절대 추론하지 않고 null 유지
+// ══════════════════════════════════════════════════════════
+function normalizeData(data) {
+    const p = data.price || {};
+    const f = data.fundamentals || {};
+    const t = data.technical || {};
+    const pSource = p.source || null;
+    const fSource = f.source || null;
+    const tSource = t.source || null;
+
+    const n = (value, source, period = null, asOfDate = null) => ({
+        value: (value != null && !isNaN(value)) ? value : null,
+        source: source || null,
+        period: period || null,   // API가 제공하지 않으면 null 그대로
+        asOfDate: asOfDate || null // API가 제공하지 않으면 null 그대로
+    });
+
+    return {
+        price:        n(p.current, pSource),
+        changePct:    n(p.changePct, pSource),
+        open:         n(p.open, pSource),
+        high:         n(p.high, pSource),
+        low:          n(p.low, pSource),
+        prevClose:    n(p.prevClose, pSource),
+        volume:       n(p.volume, pSource),
+        fifty2High:   n(p.fifty2High, pSource),
+        fifty2Low:    n(p.fifty2Low, pSource),
+        per:          n(f.peRatio ? parseFloat(f.peRatio) : null, fSource),
+        forwardPE:    n(f.forwardPE ? parseFloat(f.forwardPE) : null, fSource),
+        eps:          n(f.eps ? parseFloat(f.eps) : null, fSource),
+        pbr:          n(f.pbRatio ? parseFloat(f.pbRatio) : null, fSource),
+        roe:          n(f.roe ? parseFloat(f.roe) : null, fSource),
+        de:           n(f.debtToEquity ? parseFloat(f.debtToEquity) : null, fSource),
+        fcf:          n(f.freeCashFlow, fSource),
+        revenue:      n(f.revenue, fSource),
+        netIncome:    n(f.netIncome, fSource),
+        netMargin:    n(f.netMargin ? parseFloat(f.netMargin) : null, fSource),
+        revenueGrowth:n(f.revenueGrowthYoY ? parseFloat(f.revenueGrowthYoY) : null, fSource),
+        mktCap:       n(f.mktCap, fSource),
+        rsi:          n(t.rsi, tSource),
+        ema20:        n(t.ema20 ? parseFloat(t.ema20) : null, tSource),
+        ema50:        n(t.ema50 ? parseFloat(t.ema50) : null, tSource),
+        sma200:       n(t.sma200 ? parseFloat(t.sma200) : null, tSource),
+        macd:         { value: t.macd || null, source: tSource, period: null, asOfDate: null },
+    };
+}
+
+// ══════════════════════════════════════════════════════════
+// [신규] 2. Validation 로직 — validateData()
+// source 없는 값 제거 / null·NaN 체크 / 이상치 감지 / 다중소스 충돌
+// ══════════════════════════════════════════════════════════
+function validateData(normalized, data) {
+    const warnings = [];
+    const cleaned = {};
+
+    for (const [key, entry] of Object.entries(normalized)) {
+        // source 없는 값 제거
+        if (!entry.source) {
+            cleaned[key] = { ...entry, value: null, _removed: true };
+            continue;
+        }
+        // null/NaN 체크
+        if (key !== 'macd' && (entry.value === null || (typeof entry.value === 'number' && isNaN(entry.value)))) {
+            cleaned[key] = { ...entry, value: null };
+            continue;
+        }
+        // 이상치: changePct ±50% 초과
+        if (key === 'changePct' && entry.value != null && Math.abs(entry.value) > 50) {
+            warnings.push(`⚠️ ${key}: ${entry.value}% — 변동률 이상치 감지 (±50% 초과)`);
+        }
+        // 이상치: PER 음수 or >1000
+        if (key === 'per' && entry.value != null && (entry.value > 1000 || entry.value < -1000)) {
+            warnings.push(`⚠️ PER: ${entry.value} — 이상치 감지`);
+        }
+        cleaned[key] = entry;
+    }
+
+    // 기간 혼용 경고 (재무=연간/TTM vs 기술=일봉)
+    const hasFundamental = ['per','eps','roe','de','fcf'].some(k => cleaned[k]?.value != null);
+    const hasTechnical = ['rsi','ema20','ema50'].some(k => cleaned[k]?.value != null);
+    if (hasFundamental && hasTechnical) {
+        warnings.push('※ 재무 지표(연간/TTM 기준)와 기술 지표(일봉 기준)의 데이터 기간이 상이할 수 있습니다.');
+    }
+
+    return { cleaned, warnings };
+}
+
+// ══════════════════════════════════════════════════════════
+// [신규] 3. 6대 부문 룰기반 점수 — computeScore6()
+// 성장성 / 수익성 / 재무안정성 / 밸류에이션 / 모멘텀 / 뉴스심리
+// 각 0~100점, 데이터 없으면 null (GPT 추정 불가)
+// ══════════════════════════════════════════════════════════
+function computeScore6(cleaned, newsAnalysis) {
+    const s = (val) => val != null ? val : null;
+
+    // ── 성장성 (매출성장률 기반) ──
+    let growth = null;
+    const gv = cleaned.revenueGrowth?.value;
+    if (gv != null) {
+        if (gv > 30) growth = 90;
+        else if (gv > 20) growth = 75;
+        else if (gv > 10) growth = 60;
+        else if (gv > 0) growth = 45;
+        else if (gv > -10) growth = 25;
+        else growth = 10;
+    }
+
+    // ── 수익성 (ROE + 순이익률 기반) ──
+    let profitability = null;
+    const rv = cleaned.roe?.value;
+    const nm = cleaned.netMargin?.value;
+    if (rv != null || nm != null) {
+        let score = 0, count = 0;
+        if (rv != null) {
+            if (rv > 20) score += 80; else if (rv > 10) score += 60; else if (rv > 0) score += 40; else score += 15;
+            count++;
+        }
+        if (nm != null) {
+            if (nm > 20) score += 85; else if (nm > 10) score += 65; else if (nm > 0) score += 40; else score += 10;
+            count++;
+        }
+        profitability = Math.round(score / count);
+    }
+
+    // ── 재무안정성 (D/E + FCF 기반) ──
+    let stability = null;
+    const dev = cleaned.de?.value;
+    const fcfv = cleaned.fcf?.value;
+    if (dev != null || fcfv != null) {
+        let score = 0, count = 0;
+        if (dev != null) {
+            if (dev < 30) score += 90; else if (dev < 60) score += 70; else if (dev < 100) score += 50; else if (dev < 150) score += 30; else score += 10;
+            count++;
+        }
+        if (fcfv != null) {
+            if (fcfv > 0) score += 70; else score += 15;
+            count++;
+        }
+        stability = Math.round(score / count);
+    }
+
+    // ── 밸류에이션 (PER + PBR 기반) ──
+    let valuation = null;
+    const pev = cleaned.per?.value;
+    const pbv = cleaned.pbr?.value;
+    if (pev != null || pbv != null) {
+        let score = 0, count = 0;
+        if (pev != null) {
+            if (pev < 0) score += 10; // 적자
+            else if (pev < 12) score += 90;
+            else if (pev < 20) score += 70;
+            else if (pev < 35) score += 50;
+            else if (pev < 60) score += 30;
+            else score += 10;
+            count++;
+        }
+        if (pbv != null) {
+            if (pbv < 1) score += 85; else if (pbv < 3) score += 60; else if (pbv < 5) score += 40; else score += 15;
+            count++;
+        }
+        valuation = Math.round(score / count);
+    }
+
+    // ── 모멘텀 (RSI 기반, 보조지표 한정) ──
+    let momentum = null;
+    const rsiv = cleaned.rsi?.value;
+    if (rsiv != null) {
+        if (rsiv < 25) momentum = 85; // 과매도 → 반등 가능성
+        else if (rsiv < 40) momentum = 70;
+        else if (rsiv < 60) momentum = 55;
+        else if (rsiv < 75) momentum = 40;
+        else momentum = 20; // 과매수
+    }
+
+    // ── 뉴스심리 (룰기반 분류 결과 활용) ──
+    let newsSentiment = null;
+    if (newsAnalysis && newsAnalysis.total > 0) {
+        const pos = newsAnalysis.positive.length;
+        const neg = newsAnalysis.negative.length;
+        const total = newsAnalysis.total;
+        const ratio = (pos - neg) / total; // -1 ~ +1
+        newsSentiment = Math.round(50 + ratio * 40); // 10~90 범위
+        newsSentiment = Math.max(10, Math.min(90, newsSentiment));
+    }
+
+    // ── 종합 (null 제외 평균) ──
+    const all = [growth, profitability, stability, valuation, momentum, newsSentiment];
+    const valid = all.filter(v => v !== null);
+    const overall = valid.length > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
+
+    return { growth, profitability, stability, valuation, momentum, newsSentiment, overall };
+}
+
+// ══════════════════════════════════════════════════════════
+// [신규] 4. 뉴스 룰기반 분류 — classifyNewsItems()
+// type / strength / trust / duration
+// ══════════════════════════════════════════════════════════
+function classifyNewsItems(news) {
+    if (!news?.length) return [];
+
+    const typeKw = {
+        '실적': ['earning', 'revenue', 'profit', 'eps', 'beat', 'miss', '실적', '매출', '영업이익'],
+        '정책': ['regulation', 'policy', 'tariff', 'sanction', 'government', 'fed', '규제', '정책', '관세'],
+        '수급': ['buy', 'sell', 'volume', 'flow', 'institutional', '매수', '매도', '수급', '외국인'],
+        '업황': ['industry', 'sector', 'demand', 'supply', 'market share', '업황', '시장', '수요'],
+        '이벤트': ['launch', 'merger', 'acquisition', 'patent', 'partnership', 'ipo', '출시', '인수', '특허', '합병'],
+    };
+
+    return news.slice(0, 8).map(n => {
+        const text = `${n.title || ''} ${n.description || ''}`.toLowerCase();
+
+        // type 분류
+        let type = '기타';
+        for (const [t, kws] of Object.entries(typeKw)) {
+            if (kws.some(k => text.includes(k))) { type = t; break; }
+        }
+
+        // strength (키워드 밀도)
+        const allKw = Object.values(typeKw).flat();
+        const matchCount = allKw.filter(k => text.includes(k)).length;
+        const strength = matchCount >= 3 ? '강' : matchCount >= 1 ? '중' : '약';
+
+        // trust (source 기반)
+        const src = (n.source || '').toLowerCase();
+        const officialSrc = ['reuters', 'bloomberg', 'sec', 'wsj', 'cnbc', 'official', '공시', '금감원'];
+        const trust = officialSrc.some(s => src.includes(s)) ? '공식발표' : '언론보도';
+
+        // duration (키워드 기반 추정)
+        const shortKw = ['today', 'intraday', 'flash', '속보', '단기'];
+        const midKw = ['outlook', 'forecast', 'guidance', '전망', '중기', '성장'];
+        const hasShort = shortKw.some(k => text.includes(k));
+        const hasMid = midKw.some(k => text.includes(k));
+        const duration = hasMid ? '중기(1개월+)' : hasShort ? '일시적' : '단기(1주)';
+
+        return { title: n.title, source: n.source, type, strength, trust, duration };
+    });
+}
+
+// ══════════════════════════════════════════════════════════
+// [신규] 5. 검증된 컨텍스트 빌더 — buildVerifiedContext()
+// raw → normalize → validate → score6 → classifyNews → 로그 출력
+// ══════════════════════════════════════════════════════════
+function buildVerifiedContext(data) {
+    const normalized = normalizeData(data);
+    const { cleaned, warnings } = validateData(normalized, data);
+    const newsAn = filterAndAnalyzeNews(data.news, data.ticker, data.companyName);
+    const score6 = computeScore6(cleaned, newsAn);
+    const classifiedNews = classifyNewsItems(data.news);
+
+    // ── 테스트 로그 출력 ──
+    console.log(`\n[Analyzer/Verify] ═══ 정규화 데이터 ═══`);
+    for (const [k, v] of Object.entries(cleaned)) {
+        if (v.value != null) console.log(`  ${k}: ${typeof v.value === 'object' ? JSON.stringify(v.value) : v.value} (source: ${v.source})`);
+    }
+    console.log(`[Analyzer/Verify] ═══ Validation 결과 ═══`);
+    if (warnings.length === 0) console.log('  ✅ 이상 없음');
+    warnings.forEach(w => console.log(`  ${w}`));
+    console.log(`[Analyzer/Verify] ═══ 6대 부문 점수 ═══`);
+    console.log(`  성장성: ${score6.growth ?? 'N/A'} | 수익성: ${score6.profitability ?? 'N/A'} | 재무안정성: ${score6.stability ?? 'N/A'}`);
+    console.log(`  밸류에이션: ${score6.valuation ?? 'N/A'} | 모멘텀: ${score6.momentum ?? 'N/A'} | 뉴스심리: ${score6.newsSentiment ?? 'N/A'}`);
+    console.log(`  종합: ${score6.overall ?? 'N/A'}`);
+
+    // ── LLM 컨텍스트 문자열 생성 ──
+    const lines = [];
+    lines.push(`[검증된 데이터 — source 없는 값은 제거됨]`);
+    for (const [k, v] of Object.entries(cleaned)) {
+        if (v._removed || v.value == null) continue;
+        const val = typeof v.value === 'object' ? JSON.stringify(v.value) : v.value;
+        lines.push(`${k}: ${val} (source: ${v.source})`);
+    }
+    if (warnings.length > 0) {
+        lines.push(`\n[⚠️ Validation 경고]`);
+        warnings.forEach(w => lines.push(w));
+    }
+    lines.push(`\n[6대 부문 룰기반 점수 (0~100)]`);
+    lines.push(`성장성: ${score6.growth ?? '데이터 부족'}`);
+    lines.push(`수익성: ${score6.profitability ?? '데이터 부족'}`);
+    lines.push(`재무안정성: ${score6.stability ?? '데이터 부족'}`);
+    lines.push(`밸류에이션: ${score6.valuation ?? '데이터 부족'}`);
+    lines.push(`모멘텀: ${score6.momentum ?? '데이터 부족'} (보조지표 기반, 참고용)`);
+    lines.push(`뉴스심리: ${score6.newsSentiment ?? '데이터 부족'}`);
+    lines.push(`종합: ${score6.overall ?? '데이터 부족'}`);
+
+    if (classifiedNews.length > 0) {
+        lines.push(`\n[뉴스 룰기반 분류]`);
+        classifiedNews.forEach(cn => {
+            lines.push(`- [${cn.type}] ${cn.title} | 강도:${cn.strength} | 신뢰도:${cn.trust} | 지속성:${cn.duration}`);
+        });
+    }
+
+    return lines.join('\n');
+}
+
 function buildContextForLLM(data) {
-    // 내부적으로 사용하는 generateDataReport를 LLM에게 Context로 제공하는 용도
     const rawReport = generateDataReport(data, 'full');
+    const verifiedContext = buildVerifiedContext(data);
     let newsContext = '';
     if (data.news && data.news.length > 0) {
         newsContext = '\n[📰 최신 뉴스 (최대 5건)]\n' + data.news.slice(0, 5).map(n => `- [${n.source}] ${n.title} (${n.publishedAt})`).join('\n');
     }
-    return `<RawData>\n${rawReport}\n${newsContext}\n</RawData>`;
+    return `<RawData>\n${rawReport}\n\n[검증 데이터 및 룰기반 점수]\n${verifiedContext}\n${newsContext}\n</RawData>`;
 }
 
 const STOCK_PROMPT_TEMPLATE = `당신은 최고 수준의 데이터 기반 투자 애널리스트 "예리"입니다.
@@ -697,4 +993,4 @@ intent 분류:
     }
 }
 
-module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, computeScore };
+module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };
