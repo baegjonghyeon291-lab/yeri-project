@@ -641,7 +641,11 @@ function classifyNewsItems(news) {
         // trust (source 기반)
         const src = (n.source || '').toLowerCase();
         const officialSrc = ['reuters', 'bloomberg', 'sec', 'wsj', 'cnbc', 'official', '공시', '금감원'];
-        const trust = officialSrc.some(s => src.includes(s)) ? '공식발표' : '언론보도';
+        const majorDocs = ['yahoo', 'seekingalpha', 'motleyfool', 'benzinga', 'zacks', 'investorplace', 'marketwatch'];
+        
+        let trust = '일반보도';
+        if (officialSrc.some(s => src.includes(s))) trust = '주요/공식언론';
+        else if (majorDocs.some(s => src.includes(s))) trust = '2차인용';
 
         // duration (키워드 기반 추정)
         const shortKw = ['today', 'intraday', 'flash', '속보', '단기'];
@@ -808,6 +812,7 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 ## 💡 종합 판단
 - **🚀 한줄 액션**: (보수적 표현: "~유의 필요", "~검토 가능", "~고려해볼 수 있음")
 - **🎯 핵심 액션**: [관망 권장 / 보수적 접근 / 분할 검토 가능 / 리스크 주의] 택 1 + 이유 1~2줄
+- **핵심 이유**: (결론의 핵심 근거 1줄)
 - **⏱️ 진입 타이밍**: (<RawData>의 EMA/SMA 기반 가격 수준만 인용. 없으면 "판단 근거 부족")
 - **🔭 목표 관점**: 단기 (1주~1개월) / 중기 (3~6개월)
 - **💡 동종 업계 관심 종목**: (같은 섹터 2~3개 + 한 줄 비교)
