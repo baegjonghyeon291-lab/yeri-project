@@ -43,7 +43,7 @@ const {
     analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual,
     analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison,
     analyzeETF, analyzePortfolio, analyzeRecommendation,
-    analyzeMarket, analyzeSector, classifyQuery, fallbackChat
+    analyzeMarket, analyzeSector, classifyQuery, fallbackChat, computeScore
 } = require('./services/analyzer');
 const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability } = require('./services/data-fetcher');
 const {
@@ -264,8 +264,22 @@ app.post('/api/chat', async (req, res) => {
 
             sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastTickerTime: Date.now() });
 
-            const expectedQuestions = [`${name || ticker} 최근 뉴스 요약해줘`, `${name || ticker} 실적 전망 살펴보기`, `${name || ticker} 경쟁사와 비교해줘`];
-            messages.push({ type: 'analysis', content: report, ticker, name, expectedQuestions });
+            // UI 렌더링용 구조화 데이터
+            const score = computeScore(data);
+            const analysisData = {
+                verdict: score.verdict,
+                action: score.action,
+                totalScore: score.normalized !== null ? score.normalized * 10 : 0,
+                scores: {
+                    growth: score.growthScore !== null ? score.growthScore * 50 : 0, // 0~2 -> 0~100
+                    stability: ((score.roeScore || 0) + (score.fcfScore || 0)) * 25, // 0~4 -> 0~100
+                    momentum: ((score.rsiScore || 0) + (score.perScore || 0)) * 25   // 0~4 -> 0~100
+                },
+                peers: null // 프론트엔드에서 MD 파싱 보완
+            };
+
+            const expectedQuestions = [`${name || ticker} 왜 오를까?`, `${name || ticker} 왜 내릴까?`, `${name || ticker} 경쟁사와 비교해줘`];
+            messages.push({ type: 'analysis', content: report, ticker, name, expectedQuestions, analysisData });
             return res.json({ messages });
         }
 
@@ -488,6 +502,30 @@ app.get('/api/alerts/:userId/summary', async (req, res) => {
 
 // ── 유사 종목 추천 엔드포인트 ───────────────────────────────────────
 // GET /api/suggest?q=엔비디어  → 후보 3~5개 + confidence + exchange + currentPrice 반환
+
+// ── GET /api/hot-stocks (홈 화면 로비 노출용 핫 종목) ─────────────
+app.get('/api/hot-stocks', async (req, res) => {
+    try {
+        const topTickers = ['NVDA', 'TSLA', 'AAPL', 'MSTR', 'PLTR'];
+        const results = [];
+        
+        for (const t of topTickers) {
+            // 캐싱된 fetchAllStockData 호출 (매우 빠름)
+            const data = await fetchAllStockData(t);
+            results.push({
+                ticker: data.ticker,
+                name: data.companyName,
+                price: data.price?.current || null,
+                changePct: data.price?.changePct || null
+            });
+        }
+        res.json({ ok: true, data: results });
+    } catch (error) {
+        console.error('[API /hot-stocks] Error:', error);
+        res.status(500).json({ ok: false, message: '핫 종목 조회 실패' });
+    }
+});
+
 app.get('/api/suggest', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.json({ ok: false, error: 'q 파라미터 필요' });

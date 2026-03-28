@@ -41,36 +41,55 @@ function getApiStats() {
 }
 
 // ─────────────────────────────────────────────
-// 5분 메모리 캐시
+// 60초 메모리 캐시 (동일 종목 재요청 시 캐시 우선)
 // ─────────────────────────────────────────────
 const cache = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
+const CACHE_TTL = 60 * 1000;
 
 function fromCache(key) {
     const e = cache.get(key);
-    return e && Date.now() - e.ts < CACHE_TTL ? e.data : null;
+    if (!e) return null;
+    if (Date.now() - e.ts < CACHE_TTL) return e.data;
+    // TTL 초과해도 stale data 보관 (fallback 최후 보루)
+    return null;
+}
+function staleCache(key) {
+    const e = cache.get(key);
+    return e ? e.data : null;
 }
 function toCache(key, data) { cache.set(key, { ts: Date.now(), data }); }
 
 // ─────────────────────────────────────────────
-// Safe fetch — 에러 없이 null 반환 + 통계 기록
+// Safe fetch — 2초 timeout + 에러 없이 null 반환 + 실패 로깅
 // ─────────────────────────────────────────────
+const API_TIMEOUT = 2000; // 2초 글로벌 타임아웃
+
+function withTimeout(promise, ms = API_TIMEOUT) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))
+    ]);
+}
+
 async function safeGet(label, fn) {
     const t0 = Date.now();
     try {
-        const r = await fn();
+        const r = await withTimeout(fn(), API_TIMEOUT);
+        const elapsed = Date.now() - t0;
         const ok = r !== null && r !== undefined && r !== false;
-        recordStat(label, ok, Date.now() - t0);
+        recordStat(label, ok, elapsed);
         if (ok) {
-            console.log(`[${label}] success`);
+            console.log(`[${label}] success (${elapsed}ms)`);
             return r;
         } else {
-            console.log(`[${label}] fail (no data)`);
+            console.log(`[${label}] fail (no data, ${elapsed}ms)`);
             return null;
         }
     } catch (e) {
-        recordStat(label, false, Date.now() - t0);
-        console.log(`[${label}] fail (error)`);
+        const elapsed = Date.now() - t0;
+        recordStat(label, false, elapsed);
+        const reason = e.message === 'TIMEOUT' ? 'TIMEOUT 2s' : e.message?.slice(0, 60);
+        console.log(`[${label}] ❌ fail (${reason}, ${elapsed}ms)`);
         return null;
     }
 }
@@ -103,7 +122,7 @@ async function getPriceData(ticker) {
         ['TwelveData', async () => {
             const key = process.env.TWELVEDATA_API_KEY;
             if (!key) return null;
-            const res = await axios.get(`https://api.twelvedata.com/quote?symbol=${ticker}&apikey=${key}`, { timeout: 8000 });
+            const res = await axios.get(`https://api.twelvedata.com/quote?symbol=${ticker}&apikey=${key}`, { timeout: 2000 });
             const d = res.data;
             if (d.status === 'error') return null;
             return {
@@ -124,10 +143,10 @@ async function getPriceData(ticker) {
         ['Polygon', async () => {
             const key = process.env.POLYGON_API_KEY;
             if (!key) return null;
-            const res = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?apiKey=${key}`, { timeout: 8000 });
+            const res = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?apiKey=${key}`, { timeout: 2000 });
             const r = res.data.results?.[0];
             if (!r) return null;
-            const q = await axios.get(`https://api.polygon.io/v2/last/trade/${ticker}?apiKey=${key}`, { timeout: 5000 }).catch(() => null);
+            const q = await axios.get(`https://api.polygon.io/v2/last/trade/${ticker}?apiKey=${key}`, { timeout: 2000 }).catch(() => null);
             const current = q?.data?.results?.p || r.c;
             return {
                 current: parseFloat(current),
@@ -687,12 +706,26 @@ async function getKoreanDisclosures(corpCode) {
 // ORCHESTRATORS
 // ═══════════════════════════════════════════════════════
 
+// ─────────────────────────────────────────────
+// 60초 오케스트레이션 캐시 (중복 호출 완전 방어)
+// ─────────────────────────────────────────────
+const orchestrationCache = new Map();
+const ORCHESTRATION_TTL = 60 * 1000;
+
 /**
  * Full stock data bundle: price + history + technicals + fundamentals + news + macro + analyst + SEC
  */
 async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
     const query = companyName || ticker;
     const isKR = ticker.endsWith('.KS');
+
+    const cacheKey = `ALL_${ticker}`;
+    const cached = orchestrationCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < ORCHESTRATION_TTL) {
+        console.log(`\n[DataFetcher] ⚡ Orchestration Cache HIT for: ${ticker} (TTL 60s)`);
+        return cached.data;
+    }
+
     console.log(`\n[DataFetcher] Starting full pipeline for: ${ticker}`);
 
     let [price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures] = await Promise.all([
@@ -775,7 +808,37 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
     ];
     console.log(vLog.join('\n'));
 
-    return { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist, metadata };
+    // ── 이상치 검증: price/changePct null 또는 ±50% 초과 시 재조회 ──
+    if (price && (price.current == null || isNaN(price.current))) {
+        console.log(`[DataFetcher] ⚠️ 가격 이상치 감지 (null/NaN) → 캐시 or Yahoo 재조회`);
+        const stale = staleCache(`price_${ticker}`);
+        if (stale) { price = stale; }
+        else { price = await safeGet('Price/Yahoo-anomaly', () => yahoo.getYahooPrice(ticker)) || price; }
+    }
+    if (price && price.changePct != null && Math.abs(price.changePct) > 50) {
+        console.log(`[DataFetcher] ⚠️ 변동률 이상치 (${price.changePct}%) → Yahoo 재검증`);
+        const verify = await safeGet('Price/Yahoo-verify', () => yahoo.getYahooPrice(ticker));
+        if (verify && verify.changePct != null && Math.abs(verify.changePct) < 50) {
+            price = verify;
+        }
+    }
+
+    // ── 최소 응답 보장: 절대 "데이터 없음"으로 끝내지 않는다 ──
+    if (!price || price.current == null) {
+        console.log(`[DataFetcher] 🛟 최소 응답 보장 발동 → stale 캐시 탐색`);
+        const stale = staleCache(`price_${ticker}`);
+        if (stale) {
+            price = { ...stale, _stale: true };
+            console.log(`[DataFetcher] 🛟 stale 캐시 사용 (price: ${price.current})`);
+        } else {
+            price = { current: null, changePct: null, source: 'UNAVAILABLE', _stale: true };
+            console.log(`[DataFetcher] 🛟 최소 스켈레톤 반환 (가격 미확보)`);
+        }
+    }
+
+    const finalData = { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist, metadata };
+    orchestrationCache.set(cacheKey, { ts: Date.now(), data: finalData });
+    return finalData;
 }
 
 async function fetchMarketData() {

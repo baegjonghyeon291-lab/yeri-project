@@ -203,7 +203,9 @@ function ChatPage({ chatId }) {
 
   return (
     <div className="chat-page">
+      {/* 스크롤 메시지 영역 */}
       <div className="chat-messages">
+        <div className="chat-messages-inner">
         {messages.map((m, i) => (
           <div key={i} className={`chat-bubble-row ${m.role === 'user' ? 'user' : 'bot'}`}>
             <div className={`chat-bubble ${m.role === 'user' ? 'user' : 'bot'}`}>
@@ -284,31 +286,34 @@ function ChatPage({ chatId }) {
           </div>
         )}
         <div ref={bottomRef} />
+        </div>{/* .chat-messages-inner */}
       </div>
 
-      {/* 빠른 질문 버튼 */}
-      <div className="quick-actions">
-        {QUICK_ACTIONS.map((qa, i) => (
-          <button
-            key={i}
-            className={`quick-chip chip-${qa.cat}`}
-            onClick={() => sendMessage(qa.text)}
-            disabled={loading}
-          >{qa.label}</button>
-        ))}
-      </div>
+      {/* 하단 고정 영역: 빠른 질문 + 입력창 */}
+      <div className="chat-bottom">
+        <div className="quick-actions">
+          {QUICK_ACTIONS.map((qa, i) => (
+            <button
+              key={i}
+              className={`quick-chip chip-${qa.cat}`}
+              onClick={() => sendMessage(qa.text)}
+              disabled={loading}
+            >{qa.label}</button>
+          ))}
+        </div>
 
-      <div className="chat-input-bar">
-        <textarea
-          className="chat-input"
-          rows={2}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input.trim()) } }}
-          placeholder="종목명, 티커, 또는 질문을 입력하세요..."
-        />
-        <button className="chat-send-btn" onClick={() => sendMessage(input.trim())} disabled={loading || !input.trim()}>전송</button>
-      </div>
+        <div className="chat-input-bar">
+          <textarea
+            className="chat-input"
+            rows={2}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input.trim()) } }}
+            placeholder="종목명, 티커, 또는 질문을 입력하세요..."
+          />
+          <button className="chat-send-btn" onClick={() => sendMessage(input.trim())} disabled={loading || !input.trim()}>전송</button>
+        </div>
+      </div>{/* .chat-bottom */}
     </div>
   )
 }
