@@ -599,7 +599,13 @@ function computeScore6(cleaned, newsAnalysis) {
         reasons.valuation = parts.join(', ');
     }
     if (rsiv != null) reasons.momentum = `RSI ${rsiv.toFixed(1)}${rsiv < 30 ? '(과매도→반등 가능성)' : rsiv > 70 ? '(과매수→조정 유의)' : '(중립 구간)'}(보조지표)`;
-    if (newsSentiment != null) reasons.newsSentiment = `긍정 ${newsAnalysis.positive.length}건 / 부정 ${newsAnalysis.negative.length}건 / 총 ${newsAnalysis.total}건`;
+    if (newsSentiment != null && newsAnalysis.total > 0) {
+        if (newsAnalysis.positive.length === 0 && newsAnalysis.negative.length === 0) {
+            reasons.newsSentiment = `긍정/부정 혼재 (총 ${newsAnalysis.total}건)`;
+        } else {
+            reasons.newsSentiment = `긍정 ${newsAnalysis.positive.length}건 / 부정 ${newsAnalysis.negative.length}건 / 총 ${newsAnalysis.total}건`;
+        }
+    }
 
     // ── 종합 (null 제외 평균) ──
     const all = [growth, profitability, stability, valuation, momentum, newsSentiment];
@@ -720,8 +726,10 @@ function buildVerifiedContext(data) {
     const metricCount = Object.values(cleaned).filter(v => !v._removed && v.value != null).length;
     const totalMetrics = Object.keys(cleaned).length;
     const hasMultiSrc = new Set(Object.values(cleaned).filter(v => v.source).map(v => v.source)).size > 1;
-    lines.push(`\n[검증 상태 (5항목)]`);
-    lines.push(`원천 데이터 신뢰도: ${hasMultiSrc ? '복수 소스 확보' : '단일 소스'}`);
+    lines.push(`\n[검증 상태 (6항목)]`);
+    const isMulti = hasMultiSrc ? '예' : '아니오';
+    lines.push(`원천 데이터 신뢰도: ${hasMultiSrc ? '높음' : '보통'}`);
+    lines.push(`복수 소스 확보: ${isMulti}`);
     const coverageLevel = metricCount >= totalMetrics * 0.8 ? '높음' : (metricCount >= totalMetrics * 0.5 ? '보통' : '낮음');
     lines.push(`분석 커버리지: ${coverageLevel} (${totalMetrics}개 중 ${metricCount}개 확보)`);
     lines.push(`해석 신뢰도: 낮음 (LLM 기반 해석이므로 검증 필요)`);
@@ -763,19 +771,19 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 # 📊 [종목명] 분석 리포트
 
 ## 🎯 한줄 요약
-(핵심 축 2개만 선택하여 보수적이고 자연스러운 문장으로 작성. 예: "FCF 음수 지속"(X) → "음수 현금흐름 부담"(O), "실적 성장성 기대됨"(X) → "실적 기반의 성장 동력 보유"(O))
+(핵심 축 2개만 선택하여 보수적이고 자연스러운 문장으로 작성. 예: "FCF 음수 지속"(X) → "음수 현금흐름 부담"(O))
 
-## 📋 핵심 팩트 (해석 없이 수치만)
-| 항목 | 값 | 출처 |
-|------|------|------|
-| 현재가 | (<RawData>의 값) | (<RawData>의 출처 표시) |
-| 전일비 | (<RawData>의 값)% | (<RawData>의 출처 표시) |
-| PER | (값 또는 데이터 부족) | (출처) |
-| EPS | (값 또는 데이터 부족) | (출처) |
-| ROE | (값 또는 데이터 부족) | (출처) |
-| D/E | (값 또는 데이터 부족) | (출처) |
-| FCF | (값 또는 데이터 부족) | (출처) |
-| RSI(14) | (값 또는 데이터 부족) | (출처) |
+## 📋 핵심 팩트
+(⚠️ 모바일 가독성을 위해 절대 표를 생성하지 말고, 아래 형태의 세로형 리스트로 작성하세요)
+(⚠️ 숫자 포맷 엄수: 금액 -$1.25B / 비율 153.0% / 배수 24.4배 / 가격 $39.98 / 보조지표 37.2 형식으로 소수점 통일)
+- 현재가: (포맷팅된 값) (출처: <RawData> 출처)
+- 전일비: (포맷팅된 값)% (출처: <RawData> 출처)
+- PER: (포맷팅된 값)배 (출처: <RawData> 출처)
+- EPS: (포맷팅된 값) (출처: <RawData> 출처)
+- ROE: (포맷팅된 값)% (출처: <RawData> 출처)
+- D/E (부채비율): (포맷팅된 값)% (출처: <RawData> 출처)
+- FCF: (포맷팅된 값) (출처: <RawData> 출처)
+- RSI(14): (포맷팅된 값) (출처: <RawData> 출처)
 
 ## 📈 상승 가능성 요인
 1. [실적/재무] (근거 수치 + 출처) — ⚠️ 제한: (한계점)
@@ -788,11 +796,11 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 3. [차트/수급] (근거 + 출처, 보조지표 명시) — ⚠️ 제한: (기술지표 한계)
 
 ## 📰 뉴스 심리 분석
-<RawData>의 뉴스 분류 결과를 인용.
+<RawData>의 뉴스 분류 결과를 인용. (긍정/부정이 집계되지 않은 경우 "긍정/부정 혼재 또는 뚜렷한 특징 없음"으로 단순화할 것)
 - 대표 긍정 뉴스: (한국어 1줄 요약) — (출처)
 - 대표 부정 뉴스: (한국어 1줄 요약) — (출처)
 → 종합 심리: (긍정/부정/중립) + 왜 이 판단인지 1줄 근거
-(* 영어 원문 제목은 제외하거나 생략)
+(* 영문 원문 제목은 노출하지 않고 오직 한국어 1줄 요약만 표시)
 
 ## 💯 6대 부문 점수 (0~100점)
 ⚠️ 점수는 수집된 원천 데이터 기준으로 계산되었습니다.
@@ -801,8 +809,8 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 - 🛡️ **재무안정성**: [점수]점 — [산식 요약 인용]
 - 📊 **밸류에이션**: [점수]점 — [산식 요약 인용]
 - 🏄 **모멘텀**: [점수]점 — [산식 요약 인용] (보조지표 한정)
-- 📰 **뉴스심리**: [점수]점 — [산식 요약 인용]
-- 🏆 **종합**: [평균]점
+- 📰 **뉴스심리**: [점수]점 — [산식 요약 인용] (※점수 산식 결과가 0건으로 보이면 "뉴스 텍스트 마이닝 기반 심리 분석" 등 실제 상황에 맞게 텍스트 압축할 것)
+- 🏆 **종합**: [평균]점 ([80점 이상 긍정 / 60점 이상 보통 / 60점 미만 주의] 라벨 추가)
 
 ## ⚠️ 해석 주의사항
 - (기간 혼용 여부)
@@ -818,18 +826,19 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 - **💡 동종 업계 관심 종목**: (같은 섹터 2~3개 + 한 줄 비교)
 
 ## 🔍 검증 상태
-- **원천 데이터 신뢰도**: (<RawData>의 표기 인용)
-- **분석 커버리지**: (<RawData>의 분석 커버리지 구조 그대로 인용. 예: 높음 (26개 중 25개 확보))
+- **원천 데이터 신뢰도**: (<RawData>의 표기 인용. 예: 높음 / 보통)
+- **복수 소스 확보**: (예 / 아니오)
+- **분석 커버리지**: (<RawData>의 분석 커버리지 인용. 예: 높음 (26개 중 25개 확보))
 - **해석 신뢰도**: 낮음 (LLM 기반 해석이므로 독립 검증 필요)
 - **기간 일치성**: (<RawData>의 기간 일치성 인용)
 - **뉴스 신뢰도**: (<RawData>의 뉴스 신뢰도 인용)
 - ⚠️ 본 분석은 API 데이터 기반 자동 생성이며, 투자 결정의 근거가 아닙니다. 전문가 상담 및 추가 검증을 권장합니다.
 
 ## 🛒 매수/매도 참고
-⚠️ 아래는 투자 권유가 아닌 조건형 참고 의견입니다.
-- **매수 검토 조건**: 1~2줄 이내로 서술 (가격 근거는 괄호로 짧게. 예: 지지선 도달 시(EMA20 $40.92))
-- **매도/주의 조건**: 1~2줄 이내로 서술 (조건 구체화 및 괄호로 가격 근거 표시)
-- ⚠️ 직접 권유 금지. 항상 조건형으로 서술.
+⚠️ 아래는 투자 권유가 아닌 조건형 참고 의견입니다. (최대한 문장을 압축할 것)
+- **매수 검토**: (예: EMA20 $40.92 회복 또는 지지선 $39.98 안착 시)
+- **매도/주의**: (예: $37.98 이탈 지속 시)
+- ⚠️ 직접 권유 금지. 항상 조건형으로 짧게 서술.
 
 ## 🤖 AI 참고 의견
 (행동 원칙 중심으로 2~3문장 이내 작성. 종합 판단 반복 피하기. 예: "추격 매수보다 관망이 우세합니다.", "매수 조건 충족 시 분할 접근을 검토해볼 수 있습니다.")
