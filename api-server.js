@@ -108,7 +108,12 @@ app.get('/api/version', (req, res) => {
         distExists: require('fs').existsSync(webappDist),
         distFiles: require('fs').existsSync(path.join(webappDist, 'assets'))
             ? require('fs').readdirSync(path.join(webappDist, 'assets'))
-            : []
+            : [],
+        envKeys: {
+            finnhub: !!process.env.FINNHUB_API_KEY,
+            fmp: !!process.env.FMP_API_KEY,
+            eodhd: !!process.env.EODHD_API_KEY
+        }
     });
 });
 
@@ -388,7 +393,7 @@ app.post('/api/chat', async (req, res) => {
 
         // ★★ MED/LOW인데 [티커/종목명] + [지표] + [얼마/몇] 패턴이면 지표 키워드 제거 후 재시도 ★★
         const FACT_METRIC_KEYWORDS = ['EPS', 'PER', 'PBR', 'ROE', 'ROA', 'RSI', 'FCF', 'BPS', 'PEG', 'D/E',
-            '얼마', '몇', '수치', '값', '시총', '시가총액', '부채비율', '배당', '순이익', '매출'];
+            '얼마', '몇', '수치', '값', '시총', '시가총액', '부채비율', '배당수익률', '배당', '순이익', '매출'];
         const FACT_SUFFIXES = ['얼마', '몇', '얼마야', '몇이야', '얼마예요', '몇이예요', '얼마냐', '얼마임'];
         const hasFactMetric = FACT_METRIC_KEYWORDS.some(k => text.toUpperCase().includes(k.toUpperCase()));
         const hasFactSuffix = FACT_SUFFIXES.some(s => text.includes(s));
