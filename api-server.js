@@ -242,9 +242,10 @@ app.post('/api/chat', async (req, res) => {
             const outputMode = intent.output_mode || 'analysis_report';
             console.log(`[API /chat] ▶ output_mode: ${outputMode} | intent: ${stockIntent} | ticker: ${ticker}`);
 
-            // 1) chat_answer — 일반 대화
+            // 1) chat_answer — 일반 대화 (HIGH 티어 종목이 resolve됐으면 strategy로 교정)
             if (outputMode === 'chat_answer') {
-                const reply = await fallbackChat(text, 'normal');
+                console.log(`[API /chat] ⚠️ chat_answer인데 HIGH tier 종목(${ticker}) resolve됨 → strategy_answer로 교정`);
+                const reply = await answerStrategy(text, data, 'normal');
                 messages.push({ type: 'text', content: reply });
                 return res.json({ messages });
             }
@@ -448,8 +449,14 @@ app.post('/api/chat', async (req, res) => {
         res.json({ messages });
 
     } catch (err) {
-        console.error('[API /chat]', err.message);
-        res.status(500).json({ error: err.message });
+        console.error('[API /chat]', err.message, err.stack);
+        // 사용자에게 raw JS 에러 노출 방지
+        res.status(500).json({
+            messages: [{
+                type: 'text',
+                content: '일부 데이터 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요. 🙏'
+            }]
+        });
     }
 });
 // ── 추천 API ─────────────────────────────────────────────────────

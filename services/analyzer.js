@@ -19,16 +19,20 @@ function fmtPrice(val, currency = '$') {
 
 function fmtLargeNum(val, currency = '$') {
     if (val == null) return '데이터 없음';
-    const abs = Math.abs(val);
-    if (abs >= 1e12) return `${currency}${(val / 1e12).toFixed(2)}T`;
-    if (abs >= 1e9)  return `${currency}${(val / 1e9).toFixed(2)}B`;
-    if (abs >= 1e6)  return `${currency}${(val / 1e6).toFixed(1)}M`;
-    return `${currency}${val.toLocaleString()}`;
+    const num = safeNum(val);
+    if (num === null) return '데이터 없음';
+    const abs = Math.abs(num);
+    if (abs >= 1e12) return `${currency}${(num / 1e12).toFixed(2)}T`;
+    if (abs >= 1e9)  return `${currency}${(num / 1e9).toFixed(2)}B`;
+    if (abs >= 1e6)  return `${currency}${(num / 1e6).toFixed(1)}M`;
+    return `${currency}${num.toLocaleString()}`;
 }
 
 function fmtPct(val) {
     if (val == null) return '데이터 없음';
-    return (Number(val) >= 0 ? '+' : '') + Number(val).toFixed(2) + '%';
+    const num = safeNum(val);
+    if (num === null) return '데이터 없음';
+    return (num >= 0 ? '+' : '') + num.toFixed(2) + '%';
 }
 
 // ──────────────────────────────────────────────────────────
@@ -79,10 +83,12 @@ function computeScore(data) {
     let rsiScore = null;
     const rsi = technical?.rsi;
     if (rsi != null) {
-        if (rsi < 30) { rsiScore = 2; detail.push(`RSI: ${rsi.toFixed(1)} → 과매도 구간 (2/2점)`); }
-        else if (rsi <= 50) { rsiScore = 1; detail.push(`RSI: ${rsi.toFixed(1)} → 중립~저평가 (1/2점)`); }
-        else if (rsi <= 70) { rsiScore = 1; detail.push(`RSI: ${rsi.toFixed(1)} → 중립 (1/2점)`); }
-        else { rsiScore = 0; detail.push(`RSI: ${rsi.toFixed(1)} → 과매수 구간 (0/2점)`); }
+        const rsiVal = safeNum(rsi);
+        if (rsiVal == null) { rsiScore = null; detail.push(`RSI: 데이터 오류`); }
+        else if (rsiVal < 30) { rsiScore = 2; detail.push(`RSI: ${safeFixed(rsiVal, 1)} → 과매도 구간 (2/2점)`); }
+        else if (rsiVal <= 50) { rsiScore = 1; detail.push(`RSI: ${safeFixed(rsiVal, 1)} → 중립~저평가 (1/2점)`); }
+        else if (rsiVal <= 70) { rsiScore = 1; detail.push(`RSI: ${safeFixed(rsiVal, 1)} → 중립 (1/2점)`); }
+        else { rsiScore = 0; detail.push(`RSI: ${safeFixed(rsiVal, 1)} → 과매수 구간 (0/2점)`); }
     } else {
         rsiScore = null;
         detail.push(`RSI: 데이터 없음`);
@@ -92,10 +98,12 @@ function computeScore(data) {
     let perScore = null;
     const pe = fundamentals?.peRatio ? parseFloat(fundamentals.peRatio) : null;
     if (pe != null) {
-        if (pe < 0) { perScore = 0; detail.push(`PER: ${pe.toFixed(1)} → 적자 (0/2점)`); }
-        else if (pe < 15) { perScore = 2; detail.push(`PER: ${pe.toFixed(1)} → 저평가 (2/2점)`); }
-        else if (pe <= 30) { perScore = 1; detail.push(`PER: ${pe.toFixed(1)} → 적정 (1/2점)`); }
-        else { perScore = 0; detail.push(`PER: ${pe.toFixed(1)} → 고평가 (0/2점)`); }
+        const peVal = safeNum(pe);
+        if (peVal == null) { perScore = null; detail.push(`PER: 데이터 오류`); }
+        else if (peVal < 0) { perScore = 0; detail.push(`PER: ${safeFixed(peVal, 1)} → 적자 (0/2점)`); }
+        else if (peVal < 15) { perScore = 2; detail.push(`PER: ${safeFixed(peVal, 1)} → 저평가 (2/2점)`); }
+        else if (peVal <= 30) { perScore = 1; detail.push(`PER: ${safeFixed(peVal, 1)} → 적정 (1/2점)`); }
+        else { perScore = 0; detail.push(`PER: ${safeFixed(peVal, 1)} → 고평가 (0/2점)`); }
     } else {
         perScore = null;
         detail.push(`PER: 데이터 없음`);
@@ -105,9 +113,11 @@ function computeScore(data) {
     let roeScore = null;
     const roe = fundamentals?.roe ? parseFloat(fundamentals.roe) : null;
     if (roe != null) {
-        if (roe > 20) { roeScore = 2; detail.push(`ROE: ${roe.toFixed(1)}% → 우수 (2/2점)`); }
-        else if (roe >= 5) { roeScore = 1; detail.push(`ROE: ${roe.toFixed(1)}% → 보통 (1/2점)`); }
-        else { roeScore = 0; detail.push(`ROE: ${roe.toFixed(1)}% → 저조 (0/2점)`); }
+        const roeVal = safeNum(roe);
+        if (roeVal == null) { roeScore = null; detail.push(`ROE: 데이터 오류`); }
+        else if (roeVal > 20) { roeScore = 2; detail.push(`ROE: ${safeFixed(roeVal, 1)}% → 우수 (2/2점)`); }
+        else if (roeVal >= 5) { roeScore = 1; detail.push(`ROE: ${safeFixed(roeVal, 1)}% → 보통 (1/2점)`); }
+        else { roeScore = 0; detail.push(`ROE: ${safeFixed(roeVal, 1)}% → 저조 (0/2점)`); }
     } else {
         roeScore = null;
         detail.push(`ROE: 데이터 없음`);
@@ -117,9 +127,11 @@ function computeScore(data) {
     let growthScore = null;
     const growth = fundamentals?.revenueGrowthYoY ? parseFloat(fundamentals.revenueGrowthYoY) : null;
     if (growth != null) {
-        if (growth > 20) { growthScore = 2; detail.push(`매출성장: ${growth.toFixed(1)}% → 고성장 (2/2점)`); }
-        else if (growth >= 0) { growthScore = 1; detail.push(`매출성장: ${growth.toFixed(1)}% → 안정 (1/2점)`); }
-        else { growthScore = 0; detail.push(`매출성장: ${growth.toFixed(1)}% → 역성장 (0/2점)`); }
+        const growthVal = safeNum(growth);
+        if (growthVal == null) { growthScore = null; detail.push(`매출성장: 데이터 오류`); }
+        else if (growthVal > 20) { growthScore = 2; detail.push(`매출성장: ${safeFixed(growthVal, 1)}% → 고성장 (2/2점)`); }
+        else if (growthVal >= 0) { growthScore = 1; detail.push(`매출성장: ${safeFixed(growthVal, 1)}% → 안정 (1/2점)`); }
+        else { growthScore = 0; detail.push(`매출성장: ${safeFixed(growthVal, 1)}% → 역성장 (0/2점)`); }
     } else {
         growthScore = null;
         detail.push(`매출성장: 데이터 없음`);
@@ -131,7 +143,7 @@ function computeScore(data) {
     const revenue = fundamentals?.revenue;
     if (fcf != null) {
         const fcfMargin = revenue ? (fcf / revenue * 100) : null;
-        if (fcf > 0 && fcfMargin && fcfMargin > 10) { fcfScore = 2; detail.push(`FCF: ${fmtLargeNum(fcf)} (마진 ${fcfMargin.toFixed(1)}%) → 우수 (2/2점)`); }
+        if (fcf > 0 && fcfMargin && fcfMargin > 10) { fcfScore = 2; detail.push(`FCF: ${fmtLargeNum(fcf)} (마진 ${safeFixed(fcfMargin, 1)}%) → 우수 (2/2점)`); }
         else if (fcf > 0) { fcfScore = 1; detail.push(`FCF: ${fmtLargeNum(fcf)} → 양수 (1/2점)`); }
         else { fcfScore = 0; detail.push(`FCF: ${fmtLargeNum(fcf)} → 음수 (0/2점)`); }
     } else {
@@ -219,7 +231,7 @@ function generateDataReport(data, mode = 'full') {
     if (p.fifty2High != null) {
         lines.push(`**52주:** 고 ${fmtPrice(p.fifty2High, currency)} / 저 ${fmtPrice(p.fifty2Low, currency)}`);
         if (p.current != null) {
-            const pctOf52 = ((p.current - p.fifty2Low) / (p.fifty2High - p.fifty2Low) * 100).toFixed(0);
+            const pctOf52 = safeFixed((p.current - p.fifty2Low) / (p.fifty2High - p.fifty2Low) * 100, 0, 'N/A');
             lines.push(`**52주 내 위치:** ${pctOf52}% (0%=최저점, 100%=최고점)`);
         }
     }
@@ -230,7 +242,7 @@ function generateDataReport(data, mode = 'full') {
 
     // 기술적 지표
     lines.push('');
-    lines.push(`**RSI(14):** ${t.rsi != null ? t.rsi.toFixed(1) + ' (' + (t.rsiSignal || '') + ')' : '데이터 없음'}`);
+    lines.push(`**RSI(14):** ${t.rsi != null ? safeFixed(t.rsi, 1) + ' (' + (t.rsiSignal || '') + ')' : '데이터 없음'}`);
     lines.push(`**MACD:** ${t.macd ? `${t.macd.macd} (Signal: ${t.macd.signal}, Hist: ${t.macd.hist} → ${t.macd.trend})` : '데이터 없음'}`);
     lines.push(`**EMA20:** ${t.ema20 != null ? fmtPrice(t.ema20, currency) : '데이터 없음'} | **EMA50:** ${t.ema50 != null ? fmtPrice(t.ema50, currency) : '데이터 없음'}`);
     lines.push(`**SMA200:** ${t.sma200 != null ? fmtPrice(t.sma200, currency) : '데이터 없음'}`);
@@ -254,7 +266,7 @@ function generateDataReport(data, mode = 'full') {
     // 애널리스트
     if (data.analystRatings?.consensus?.targetMean) {
         const c = data.analystRatings.consensus;
-        lines.push(`\n**기관 평균 목표가:** ${fmtPrice(parseFloat(c.targetMean).toFixed(2), currency)} (고: ${fmtPrice(c.targetHigh, currency)} / 저: ${fmtPrice(c.targetLow, currency)}) | 컨센서스: ${c.rating || '데이터 없음'}`);
+        lines.push(`\n**기관 평균 목표가:** ${fmtPrice(safeFixed(parseFloat(c.targetMean), 2, null), currency)} (고: ${fmtPrice(c.targetHigh, currency)} / 저: ${fmtPrice(c.targetLow, currency)}) | 컨센서스: ${c.rating || '데이터 없음'}`);
     }
 
     // ━━━━━━ 해석 (데이터 기반만) ━━━━━━
@@ -282,18 +294,19 @@ function generateDataReport(data, mode = 'full') {
 
     // RSI 해석
     if (t.rsi != null) {
-        if (t.rsi < 30) lines.push(`• RSI ${t.rsi.toFixed(1)} → 과매도 구간, 반등 가능성 존재`);
-        else if (t.rsi > 70) lines.push(`• RSI ${t.rsi.toFixed(1)} → 과매수 구간, 조정 가능성 존재`);
-        else lines.push(`• RSI ${t.rsi.toFixed(1)} → 중립 구간`);
+        const rsiVal = safeNum(t.rsi);
+        if (rsiVal != null && rsiVal < 30) lines.push(`• RSI ${safeFixed(rsiVal, 1)} → 과매도 구간, 반등 가능성 존재`);
+        else if (rsiVal != null && rsiVal > 70) lines.push(`• RSI ${safeFixed(rsiVal, 1)} → 과매수 구간, 조정 가능성 존재`);
+        else if (rsiVal != null) lines.push(`• RSI ${safeFixed(rsiVal, 1)} → 중립 구간`);
     }
 
     // 재무 해석
     if (f.peRatio != null) {
-        const pe = parseFloat(f.peRatio);
-        if (pe < 0) lines.push(`• PER ${pe.toFixed(1)} → 현재 적자 상태`);
-        else if (pe < 15) lines.push(`• PER ${pe.toFixed(1)} → 저평가 구간`);
-        else if (pe > 40) lines.push(`• PER ${pe.toFixed(1)} → 고평가 구간`);
-        else lines.push(`• PER ${pe.toFixed(1)} → 적정 밸류에이션`);
+        const pe = safeNum(f.peRatio);
+        if (pe != null && pe < 0) lines.push(`• PER ${safeFixed(pe, 1)} → 현재 적자 상태`);
+        else if (pe != null && pe < 15) lines.push(`• PER ${safeFixed(pe, 1)} → 저평가 구간`);
+        else if (pe != null && pe > 40) lines.push(`• PER ${safeFixed(pe, 1)} → 고평가 구간`);
+        else if (pe != null) lines.push(`• PER ${safeFixed(pe, 1)} → 적정 밸류에이션`);
     }
     if (f.netIncome != null && f.netIncome < 0) {
         lines.push(`• 순이익 적자: ${fmtLargeNum(f.netIncome, currency)} → 수익성 확보 필요`);
@@ -316,9 +329,9 @@ function generateDataReport(data, mode = 'full') {
     lines.push(`⚠️ **리스크 (데이터 기반)**\n`);
 
     const risks = [];
-    if (t.rsi != null && t.rsi > 70) risks.push(`RSI ${t.rsi.toFixed(1)} 과매수 → 단기 조정 위험`);
-    if (f.peRatio != null && parseFloat(f.peRatio) > 40) risks.push(`PER ${parseFloat(f.peRatio).toFixed(1)} 고평가 → 밸류에이션 부담`);
-    if (f.peRatio != null && parseFloat(f.peRatio) < 0) risks.push(`PER 적자 → 수익성 훼손 리스크`);
+    if (t.rsi != null && safeNum(t.rsi) > 70) risks.push(`RSI ${safeFixed(t.rsi, 1)} 과매수 → 단기 조정 위험`);
+    if (f.peRatio != null && safeNum(f.peRatio) > 40) risks.push(`PER ${safeFixed(f.peRatio, 1)} 고평가 → 밸류에이션 부담`);
+    if (f.peRatio != null && safeNum(f.peRatio) < 0) risks.push(`PER 적자 → 수익성 훼손 리스크`);
     if (f.debtToEquity != null && parseFloat(f.debtToEquity) > 150) risks.push(`D/E ${f.debtToEquity} → 부채 비율 높음`);
     if (f.freeCashFlow != null && f.freeCashFlow < 0) risks.push(`FCF 음수 → 현금 유출 지속 시 유동성 리스크`);
     if (f.netMargin != null && parseFloat(f.netMargin) < 0) risks.push(`순이익률 적자 → 수익 구조 불안정`);
@@ -362,7 +375,7 @@ function generateDataReport(data, mode = 'full') {
             if (p.fifty2High) lines.push(`• 2차 목표가: ${fmtPrice(p.fifty2High, currency)} (52주 고점)`);
             lines.push(`• 손절선: ${fmtPrice(s * 0.95, currency)} 이탈 시`);
         }
-        if (t.rsi != null && t.rsi > 65) lines.push(`• RSI ${t.rsi.toFixed(1)} → 과매수 접근, 일부 익절 고려`);
+        if (t.rsi != null && safeNum(t.rsi) > 65) lines.push(`• RSI ${safeFixed(t.rsi, 1)} → 과매수 접근, 일부 익절 고려`);
     }
 
     // ━━━━━━ 데이터 출처 및 신뢰도 ━━━━━━
@@ -579,26 +592,26 @@ function computeScore6(cleaned, newsAnalysis) {
 
     // ── 산식 요약 (각 점수의 가점/감점 방향) ──
     const reasons = {};
-    if (gv != null) reasons.growth = `매출성장률 ${gv > 0 ? '+' : ''}${gv.toFixed(1)}% → ${gv > 10 ? '가점' : gv > 0 ? '소폭 가점' : '감점'}`;
+    if (gv != null) reasons.growth = `매출성장률 ${gv > 0 ? '+' : ''}${safeFixed(gv, 1)}% → ${gv > 10 ? '가점' : gv > 0 ? '소폭 가점' : '감점'}`;
     if (rv != null || nm != null) {
         const parts = [];
-        if (rv != null) parts.push(`ROE ${rv.toFixed(1)}%${rv > 15 ? '(양호)' : rv > 0 ? '(보통)' : '(저조)'}`);
-        if (nm != null) parts.push(`순이익률 ${nm.toFixed(1)}%${nm > 10 ? '(양호)' : nm > 0 ? '(보통)' : '(적자)'}`);
+        if (rv != null) parts.push(`ROE ${safeFixed(rv, 1)}%${rv > 15 ? '(양호)' : rv > 0 ? '(보통)' : '(저조)'}`);
+        if (nm != null) parts.push(`순이익률 ${safeFixed(nm, 1)}%${nm > 10 ? '(양호)' : nm > 0 ? '(보통)' : '(적자)'}`);
         reasons.profitability = parts.join(', ');
     }
     if (dev != null || fcfv != null) {
         const parts = [];
-        if (dev != null) parts.push(`D/E ${dev.toFixed(0)}%${dev > 100 ? '(높음→감점)' : '(양호)'}`);
+        if (dev != null) parts.push(`D/E ${safeFixed(dev, 0)}%${dev > 100 ? '(높음→감점)' : '(양호)'}`);
         if (fcfv != null) parts.push(`FCF ${fcfv > 0 ? '양수(+)' : '음수(−)→감점'}`);
         reasons.stability = parts.join(', ');
     }
     if (pev != null || pbv != null) {
         const parts = [];
-        if (pev != null) parts.push(`PER ${pev.toFixed(1)}${pev > 35 ? '(부담→감점)' : pev < 15 ? '(저평가→가점)' : '(적정)'}`);
-        if (pbv != null) parts.push(`PBR ${pbv.toFixed(1)}${pbv > 3 ? '(부담)' : pbv < 1 ? '(저평가→가점)' : ''}`);
+        if (pev != null) parts.push(`PER ${safeFixed(pev, 1)}${pev > 35 ? '(부담→감점)' : pev < 15 ? '(저평가→가점)' : '(적정)'}`);
+        if (pbv != null) parts.push(`PBR ${safeFixed(pbv, 1)}${pbv > 3 ? '(부담)' : pbv < 1 ? '(저평가→가점)' : ''}`);
         reasons.valuation = parts.join(', ');
     }
-    if (rsiv != null) reasons.momentum = `RSI ${rsiv.toFixed(1)}${rsiv < 30 ? '(과매도→반등 가능성)' : rsiv > 70 ? '(과매수→조정 유의)' : '(중립 구간)'}(보조지표)`;
+    if (rsiv != null) reasons.momentum = `RSI ${safeFixed(rsiv, 1)}${rsiv < 30 ? '(과매도→반등 가능성)' : rsiv > 70 ? '(과매수→조정 유의)' : '(중립 구간)'}(보조지표)`;
     if (newsSentiment != null && newsAnalysis.total > 0) {
         if (newsAnalysis.positive.length === 0 && newsAnalysis.negative.length === 0) {
             reasons.newsSentiment = `긍정/부정 혼재 (총 ${newsAnalysis.total}건)`;
@@ -915,8 +928,8 @@ async function analyzeStockComparison(data1, data2, useDeep = false, tone = 'nor
     lines.push(`• ${nameB}: ${data2.price?.current != null ? fmtPrice(data2.price.current, cB) : '데이터 없음'} (${data2.price?.changePct != null ? fmtPct(data2.price.changePct) : '데이터 없음'})\n`);
 
     lines.push(`**기술적 지표:**`);
-    lines.push(`• ${nameA}: RSI ${t1.rsi != null ? t1.rsi.toFixed(1) : '데이터 없음'} | EMA20 ${t1.ema20 != null ? fmtPrice(t1.ema20, cA) : '데이터 없음'}`);
-    lines.push(`• ${nameB}: RSI ${t2.rsi != null ? t2.rsi.toFixed(1) : '데이터 없음'} | EMA20 ${t2.ema20 != null ? fmtPrice(t2.ema20, cB) : '데이터 없음'}\n`);
+    lines.push(`• ${nameA}: RSI ${t1.rsi != null ? safeFixed(t1.rsi, 1) : '데이터 없음'} | EMA20 ${t1.ema20 != null ? fmtPrice(t1.ema20, cA) : '데이터 없음'}`);
+    lines.push(`• ${nameB}: RSI ${t2.rsi != null ? safeFixed(t2.rsi, 1) : '데이터 없음'} | EMA20 ${t2.ema20 != null ? fmtPrice(t2.ema20, cB) : '데이터 없음'}\n`);
 
     lines.push(`**재무:**`);
     lines.push(`• ${nameA}: PER ${f1.peRatio ?? '데이터 없음'} | ROE ${f1.roe ?? '데이터 없음'} | 매출성장 ${f1.revenueGrowthYoY ?? '데이터 없음'}`);
@@ -970,7 +983,7 @@ async function analyzeMarket(data, useDeep = false, tone = 'normal') {
     }
     const newsText = (news || []).slice(0, 6).map(n => `- [${n.publishedAt}] ${n.title}`).join('\n');
     const today = new Date().toLocaleDateString('ko-KR');
-    const prompt = `시장 전체 분석. 데이터만 사용, 추론 금지.\n[기준일: ${today}]\nS&P500: ${indices?.['S&P 500']?.current || '확인불가'} (${indices?.['S&P 500']?.changePct?.toFixed(2) || '확인불가'}%)\nNASDAQ: ${indices?.['NASDAQ']?.current || '확인불가'} (${indices?.['NASDAQ']?.changePct?.toFixed(2) || '확인불가'}%)\n금리: ${macro?.federalFundsRate ?? '확인불가'}% | VIX: ${macro?.vix ?? '확인불가'}\n뉴스:\n${newsText || '없음'}\n\n간결하게 요약: 1) 시장 현황 2) 거시경제 영향 3) 리스크 4) 전략. '확인불가'로 나오는 지표는 브리핑에서 절대 언급하지 말고 제외할 것.`;
+    const prompt = `시장 전체 분석. 데이터만 사용, 추론 금지.\n[기준일: ${today}]\nS&P500: ${indices?.['S&P 500']?.current || '확인불가'} (${safeFixed(indices?.['S&P 500']?.changePct, 2, '확인불가')}%)\nNASDAQ: ${indices?.['NASDAQ']?.current || '확인불가'} (${safeFixed(indices?.['NASDAQ']?.changePct, 2, '확인불가')}%)\n금리: ${macro?.federalFundsRate ?? '확인불가'}% | VIX: ${macro?.vix ?? '확인불가'}\n뉴스:\n${newsText || '없음'}\n\n간결하게 요약: 1) 시장 현황 2) 거시경제 영향 3) 리스크 4) 전략. '확인불가'로 나오는 지표는 브리핑에서 절대 언급하지 말고 제외할 것.`;
     return callOpenAI(prompt, useDeep, tone);
 }
 
@@ -979,7 +992,7 @@ async function analyzeSector(sectorData, useDeep = false, tone = 'normal') {
     const today = new Date().toLocaleDateString('ko-KR');
     const stockLines = stocks.map(s => {
         const sc = computeScore(s);
-        return `${s.ticker}: 점수 ${sc.normalized}/10 | RSI ${s.technical?.rsi?.toFixed(1) || 'N/A'} | PER ${s.fundamentals?.peRatio || 'N/A'}`;
+        return `${s.ticker}: 점수 ${sc.normalized}/10 | RSI ${safeFixed(s.technical?.rsi, 1, 'N/A')} | PER ${s.fundamentals?.peRatio || 'N/A'}`;
     }).join('\n');
     const prompt = `[${sector}] 섹터 분석. 데이터만 사용.\n[기준일: ${today}]\n${stockLines}\n\n간결 요약: 1) 섹터 현황 2) 대표 종목 점수 3) 리스크 4) 접근 전략`;
     return callOpenAI(prompt, useDeep, tone);
@@ -992,7 +1005,7 @@ async function analyzeETF(data, useDeep = false, tone = 'normal', etfMeta = {}) 
 async function analyzePortfolio(portfolioItems, useDeep = false, tone = 'normal') {
     const today = new Date().toLocaleDateString('ko-KR');
     const portfolioText = portfolioItems.map(p => {
-        const pnlPct = p.avgPrice > 0 ? ((p.currentPrice / p.avgPrice - 1) * 100).toFixed(2) : '0';
+        const pnlPct = p.avgPrice > 0 ? safeFixed((p.currentPrice / p.avgPrice - 1) * 100, 2, '0') : '0';
         return `- ${p.name || p.ticker}: ${p.quantity}주 (평단 ${p.avgPrice} → 현재 ${p.currentPrice || 'N/A'}) | 비중 ${p.weight}% | 수익률 ${pnlPct}%`;
     }).join('\n');
     const prompt = `포트폴리오 분석. 데이터 기반만. 추론 금지.\n[기준일: ${today}]\n${portfolioText}\n\n간결 요약: 1) 전체 현황 2) 섹터 집중도 3) 리스크 4) 리밸런싱 제안`;
@@ -1096,8 +1109,18 @@ intent 분류:
             else if (parsed.intent === 'fallback') parsed.output_mode = 'chat_answer';
             else parsed.output_mode = 'fact_answer';
         }
-        // 안전장치: 종목명이 포함된 질문인데 chat_answer로 분류된 경우 strategy_answer로 교정
-        if (parsed.output_mode === 'chat_answer' && parsed.type === 'stock') {
+        // 코드 레벨 강제 교정 — GPT가 잘못 분류해도 방어
+        const STRATEGY_KEYWORDS = ['괜찮아', '어때', '어떄', '살만해', '살만한가', '위험해', '위험한가', '지금 어때', '들어가도 돼', '들어가도 될까', '살까', '해도 돼', '해도 될까', '사도 돼', '사도 될까', '팔까', '매수해', '매도해', '괜찮을까', '어떨까', '좋아?', '좋을까', '나을까', '나아?'];
+        const lowerMsg = message.toLowerCase();
+        const hasStrategyKeyword = STRATEGY_KEYWORDS.some(k => lowerMsg.includes(k));
+
+        // chat_answer인데 종목명이거나 전략 키워드가 있으면 교정
+        if (parsed.output_mode === 'chat_answer' && (parsed.type === 'stock' || hasStrategyKeyword)) {
+            parsed.output_mode = 'strategy_answer';
+            console.log(`[classifyQuery] ⚠️ chat_answer → strategy_answer 강제 교정 (keyword match)`);
+        }
+        // 종목+판단 키워드 조합이면 analysis_report가 아닌 한 strategy 우선
+        if (hasStrategyKeyword && parsed.type === 'stock' && parsed.output_mode !== 'analysis_report') {
             parsed.output_mode = 'strategy_answer';
         }
         return parsed;
@@ -1109,10 +1132,23 @@ intent 분류:
 // ══════════════════════════════════════════════════════════
 // 숫자 안전 포맷 유틸리티 (toFixed 크래시 완전 방지)
 // ══════════════════════════════════════════════════════════
+function safeNum(value) {
+    if (value == null) return null;
+    if (typeof value === 'number') return isNaN(value) ? null : value;
+    const n = Number(value);
+    return isNaN(n) ? null : n;
+}
+
+function safeFixed(value, decimals = 2, fallback = '데이터 없음') {
+    const n = safeNum(value);
+    if (n === null) return fallback;
+    return n.toFixed(decimals);
+}
+
 function formatSafe(value, decimals = 2, prefix = '', suffix = '') {
     if (value == null) return null;
-    const num = typeof value === 'number' ? value : Number(value);
-    if (isNaN(num)) return typeof value === 'string' ? `${prefix}${value}${suffix}` : null;
+    const num = safeNum(value);
+    if (num === null) return typeof value === 'string' ? `${prefix}${value}${suffix}` : null;
     return `${prefix}${num.toFixed(decimals)}${suffix}`;
 }
 
