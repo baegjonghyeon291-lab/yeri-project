@@ -394,7 +394,7 @@ app.post('/api/chat', async (req, res) => {
         const hasFactSuffix = FACT_SUFFIXES.some(s => text.includes(s));
 
         if ((suggestion.tier === 'MED' || suggestion.tier === 'LOW') && hasFactMetric && hasFactSuffix) {
-            // 지표 키워드 제거 후 티커만 추출해서 재시도
+            // 지표 키워드 + 한국어 접미사 모두 제거 후 티커만 추출해서 재시도
             let strippedText = text;
             for (const mk of FACT_METRIC_KEYWORDS) {
                 strippedText = strippedText.replace(new RegExp(mk, 'gi'), '');
@@ -402,18 +402,26 @@ app.post('/api/chat', async (req, res) => {
             for (const fs of FACT_SUFFIXES) {
                 strippedText = strippedText.replace(new RegExp(fs, 'g'), '');
             }
-            strippedText = strippedText.replace(/[??\.\s]+$/g, '').trim();
+            // 한국어 잔여 접미사 + 물음표/공백 정리
+            strippedText = strippedText
+                .replace(/[이가은는을를의에서도야요인가요인가지금좀봐줘알려줘]+/g, '')
+                .replace(/[?？\.\s]+/g, ' ')
+                .trim();
             console.log(`[API /chat] ▶ fact_answer 재시도: "${text}" → stripped="${strippedText}"`);
 
             if (strippedText.length > 0) {
+                // 1차: resolveStock 직접 시도 (가장 정확)
+                const directResolve = resolveStock(strippedText);
+                // 2차: suggestCandidates
                 const retryExtracted = extractCompanyName(strippedText) || strippedText;
                 const retrySuggestion = suggestCandidates(retryExtracted);
 
-                if (retrySuggestion.tier === 'HIGH' && retrySuggestion.resolved) {
-                    let ticker = retrySuggestion.resolved.ticker;
-                    let name = retrySuggestion.resolved.name;
-                    let market = retrySuggestion.resolved.market;
-                    let corpCode = retrySuggestion.resolved.corpCode || null;
+                const resolvedInfo = directResolve || (retrySuggestion.tier === 'HIGH' && retrySuggestion.resolved);
+                if (resolvedInfo) {
+                    let ticker = resolvedInfo.ticker;
+                    let name = resolvedInfo.name;
+                    let market = resolvedInfo.market;
+                    let corpCode = resolvedInfo.corpCode || null;
                     if (market === 'KR') {
                         const krInfo = resolveKoreanTicker(ticker);
                         if (krInfo) { ticker = toFinnhubKRFormat(krInfo.ticker); name = krInfo.name; corpCode = krInfo.corpCode; }
