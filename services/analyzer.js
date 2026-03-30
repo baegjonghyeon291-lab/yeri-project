@@ -1025,7 +1025,7 @@ async function classifyQuery(message) {
 JSON만 응답:
 {
   "type": "stock" | "market" | "sector" | "etf" | "portfolio" | "general",
-  "intent": "full_analysis" | "buy_timing" | "sell_timing" | "risk_check" | "earnings_check" | "overheat_check" | "valuation_check" | "compare_stocks" | "sector_analysis" | "recommendation" | "etf_analysis" | "portfolio_analysis" | "fallback",
+  "intent": "full_analysis" | "general_question" | "buy_timing" | "sell_timing" | "risk_check" | "earnings_check" | "overheat_check" | "valuation_check" | "compare_stocks" | "sector_analysis" | "recommendation" | "etf_analysis" | "portfolio_analysis" | "fallback",
   "ticker": "AAPL" | null,
   "name": "Apple" | null,
   "market": "US" | "KR",
@@ -1040,8 +1040,8 @@ type 분류:
 - 종목+숫자 패턴 → type:"portfolio"
 - 일반 대화 → type:"general"
 
-intent 분류:
-- "어때", "분석해줘", "전망" → intent:"full_analysis"
+intent 분류 (핵심!):
+- "어때", "분석해줘", "전망", "괜찮아?" → intent:"full_analysis"
 - "언제 사", "매수" → intent:"buy_timing"
 - "언제 팔", "목표가" → intent:"sell_timing"
 - "위험", "리스크" → intent:"risk_check"
@@ -1050,7 +1050,11 @@ intent 분류:
 - "비싸", "고평가", "PER" → intent:"valuation_check"
 - "vs", "비교" → intent:"compare_stocks"
 - "추천", "뭐 살까" → intent:"recommendation"
-- 일반 대화 → intent:"fallback"`,
+- 일반 대화 → intent:"fallback"
+- ★ 종목명은 포함하지만 분석/전망/매수/매도 요청이 아닌 단순 질문 → intent:"general_question"
+  예시: "테슬라 저번달에 얼마였어?", "애플 CEO 누구야?", "엔비디아 본사 어디야?",
+        "삼성전자 배당금 얼마야?", "테슬라 최근 뉴스 뭐야?", "애플 상장일이 언제야?",
+        "TSLA 52주 최고가는?", "테슬라 시총 얼마야?"`,
         max_output_tokens: 300,
     });
     try {
@@ -1061,4 +1065,39 @@ intent 분류:
     }
 }
 
-module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };
+/**
+ * 종목 컨텍스트 포함 간결한 Q&A 응답 (분석 리포트 아님)
+ */
+async function answerStockQuestion(question, stockData, tone = 'normal') {
+    const ticker = stockData.ticker || '';
+    const name = stockData.companyName || ticker;
+    const price = stockData.price?.current != null ? `$${stockData.price.current.toLocaleString()}` : '데이터 없음';
+    const changePct = stockData.price?.changePct != null ? `${stockData.price.changePct > 0 ? '+' : ''}${stockData.price.changePct.toFixed(2)}%` : '';
+    const f = stockData.fundamentals || {};
+    const newsText = (stockData.news || []).slice(0, 3).map(n => `- ${n.title} (${n.source})`).join('\n');
+
+    const context = [
+        `[종목 정보] ${name} (${ticker})`,
+        `현재가: ${price} ${changePct}`,
+        f.marketCap ? `시가총액: $${(f.marketCap / 1e9).toFixed(1)}B` : '',
+        f.pe ? `PER: ${f.pe.toFixed(1)}` : '',
+        f.eps ? `EPS: $${f.eps.toFixed(2)}` : '',
+        f.dividendYield ? `배당수익률: ${(f.dividendYield * 100).toFixed(2)}%` : '',
+        f['52WeekHigh'] ? `52주 최고: $${f['52WeekHigh']}` : '',
+        f['52WeekLow'] ? `52주 최저: $${f['52WeekLow']}` : '',
+        newsText ? `\n[최신 뉴스]\n${newsText}` : '',
+    ].filter(Boolean).join('\n');
+
+    const prompt = `사용자가 투자 비서 "예리"에게 종목 관련 질문을 했습니다.
+아래 데이터를 참고하여 질문에만 간결하게 답변하세요. (3~6줄)
+전체 분석 리포트를 작성하지 마세요. 질문에 대한 답만 하세요.
+"더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!" 를 마지막에 추가하세요.
+
+${context}
+
+사용자 질문: "${question}"`;
+
+    return callOpenAI(prompt, false, tone);
+}
+
+module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };

@@ -43,7 +43,7 @@ const {
     analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual,
     analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison,
     analyzeETF, analyzePortfolio, analyzeRecommendation,
-    analyzeMarket, analyzeSector, classifyQuery, fallbackChat, computeScore,
+    analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, computeScore,
     normalizeData, validateData, computeScore6, classifyNewsItems
 } = require('./services/analyzer');
 const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability } = require('./services/data-fetcher');
@@ -236,6 +236,14 @@ app.post('/api/chat', async (req, res) => {
 
             const data = await fetchAllStockData(ticker, name, corpCode);
             data.investmentContext = session.context;
+
+            // ★ 일반 질문 (분석 요청이 아닌 경우) → 간결한 Q&A 응답
+            if (stockIntent === 'general_question' || intent.intent === 'general_question') {
+                console.log(`[API /chat] ▶ general_question 모드: "${text}" (${ticker})`);
+                const answer = await answerStockQuestion(text, data, 'normal');
+                messages.push({ type: 'text', content: answer });
+                return res.json({ messages });
+            }
 
             const reliability = computeDataReliability(data);
             if (reliability.tier === 'NO_DATA') {
