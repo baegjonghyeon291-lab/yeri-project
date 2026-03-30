@@ -1188,10 +1188,47 @@ function buildStockContext(stockData) {
 async function answerFact(question, stockData, tone = 'normal') {
     const name = stockData.companyName || stockData.ticker;
     const ctx = buildStockContext(stockData);
+
+    // 데이터 가용성 요약 생성 — GPT가 대체 지표를 안내할 수 있도록
+    const f = stockData.fundamentals || {};
+    const t = stockData.technical || {};
+    const p = stockData.price || {};
+    const availability = [];
+    const unavailable = [];
+
+    if (p.current != null) availability.push('현재가'); else unavailable.push('현재가');
+    if (p.changePct != null) availability.push('전일대비 등락률'); else unavailable.push('전일대비 등락률');
+    if (f.eps != null) availability.push('EPS'); else unavailable.push('EPS');
+    if (f.pe != null || f.peRatio != null) availability.push('PER'); else unavailable.push('PER');
+    if (f.roe != null) availability.push('ROE'); else unavailable.push('ROE');
+    if (f.debtToEquity != null) availability.push('D/E(부채비율)'); else unavailable.push('D/E(부채비율)');
+    if (f.freeCashFlow != null) availability.push('FCF'); else unavailable.push('FCF');
+    if (f.marketCap != null) availability.push('시가총액'); else unavailable.push('시가총액');
+    if (f.dividendYield != null) availability.push('배당수익률'); else unavailable.push('배당수익률');
+    if (f.pbRatio != null) availability.push('PBR'); else unavailable.push('PBR');
+    if (f.revenueGrowthYoY != null) availability.push('매출성장률'); else unavailable.push('매출성장률');
+    if (f.netMargin != null) availability.push('순이익률'); else unavailable.push('순이익률');
+    if (t.rsi != null) availability.push('RSI'); else unavailable.push('RSI');
+    if (t.ema20 != null) availability.push('EMA20'); else unavailable.push('EMA20');
+
+    const availStr = availability.length > 0 ? `확인 가능: ${availability.join(', ')}` : '확인 가능한 지표 없음';
+    const unavailStr = unavailable.length > 0 ? `확인 불가: ${unavailable.join(', ')}` : '';
+
     const prompt = `사용자가 투자 비서 "예리"에게 종목의 특정 수치/사실을 물었습니다.
 아래 데이터에서 해당 수치만 정확히 찾아 2~4줄로 간결하게 답하세요.
 절대 전체 분석 리포트를 작성하지 마세요. 묻는 수치/사실만 답하세요.
+
+중요 규칙:
+- 질문한 지표 데이터가 있으면 → 해당 수치를 정확히 답변
+- 질문한 지표 데이터가 없으면 → "현재 데이터 소스에서 [지표명] 수치가 제공되지 않고 있습니다." 라고 안내한 뒤,
+  확인 가능한 대체 지표 2~3개를 짧게 추천 (예: "대신 PER, EPS, FCF는 확인 가능합니다.")
+- "데이터 없음"이라고만 쓰지 마세요. 사용자가 다음 행동을 할 수 있도록 안내하세요.
+
 마지막에: "더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!"
+
+[데이터 가용성]
+${availStr}
+${unavailStr}
 
 ${ctx}
 
