@@ -43,8 +43,9 @@ const {
     analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual,
     analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison,
     analyzeETF, analyzePortfolio, analyzeRecommendation,
-    analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, computeScore,
-    normalizeData, validateData, computeScore6, classifyNewsItems
+    analyzeMarket, analyzeSector, classifyQuery, fallbackChat,
+    answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy,
+    computeScore, normalizeData, validateData, computeScore6, classifyNewsItems
 } = require('./services/analyzer');
 const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability } = require('./services/data-fetcher');
 const {
@@ -237,13 +238,53 @@ app.post('/api/chat', async (req, res) => {
             const data = await fetchAllStockData(ticker, name, corpCode);
             data.investmentContext = session.context;
 
-            // ★ 일반 질문 (분석 요청이 아닌 경우) → 간결한 Q&A 응답
-            if (stockIntent === 'general_question' || intent.intent === 'general_question') {
-                console.log(`[API /chat] ▶ general_question 모드: "${text}" (${ticker})`);
-                const answer = await answerStockQuestion(text, data, 'normal');
-                messages.push({ type: 'text', content: answer });
+            // ★★ output_mode 기반 7-way 분기 라우터 ★★
+            const outputMode = intent.output_mode || 'analysis_report';
+            console.log(`[API /chat] ▶ output_mode: ${outputMode} | intent: ${stockIntent} | ticker: ${ticker}`);
+
+            // 1) chat_answer — 일반 대화
+            if (outputMode === 'chat_answer') {
+                const reply = await fallbackChat(text, 'normal');
+                messages.push({ type: 'text', content: reply });
                 return res.json({ messages });
             }
+
+            // 2) concept_answer — 용어/개념 설명 (종목 데이터 불필요)
+            if (outputMode === 'concept_answer') {
+                const reply = await answerConcept(text, 'normal');
+                messages.push({ type: 'text', content: reply });
+                return res.json({ messages });
+            }
+
+            // 3) fact_answer — 수치/사실 간결 답변
+            if (outputMode === 'fact_answer') {
+                const reply = await answerFact(text, data, 'normal');
+                messages.push({ type: 'text', content: reply });
+                return res.json({ messages });
+            }
+
+            // 4) reason_answer — 이유/원인 답변
+            if (outputMode === 'reason_answer') {
+                const reply = await answerReason(text, data, 'normal');
+                messages.push({ type: 'text', content: reply });
+                return res.json({ messages });
+            }
+
+            // 5) strategy_answer — 전략/판단 답변
+            if (outputMode === 'strategy_answer') {
+                const reply = await answerStrategy(text, data, 'normal');
+                messages.push({ type: 'text', content: reply });
+                return res.json({ messages });
+            }
+
+            // 6) comparison_answer — 비교 (기존 비교 로직과 중복이므로 여기선 간단 처리)
+            if (outputMode === 'comparison_answer') {
+                const reply = await answerFact(text, data, 'normal');
+                messages.push({ type: 'text', content: reply });
+                return res.json({ messages });
+            }
+
+            // 7) analysis_report — 전체 분석 리포트 (기존 로직 유지)
 
             const reliability = computeDataReliability(data);
             if (reliability.tier === 'NO_DATA') {

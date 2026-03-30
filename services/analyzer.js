@@ -1016,88 +1016,190 @@ async function fallbackChat(message, tone = 'normal') {
     return callOpenAI(prompt, false, tone);
 }
 
+// ══════════════════════════════════════════════════════════
+// 7-MODE 의도 분류기
+// ══════════════════════════════════════════════════════════
 async function classifyQuery(message) {
     const response = await client.responses.create({
         model: 'gpt-4o-mini',
-        instructions: '주식 질문 분류기. JSON만 응답. intent 필드를 반드시 포함하라.',
-        input: `다음 텍스트의 의도를 분류하라: "${message}"
+        instructions: '주식 질문 의도 분류기. JSON만 응답.',
+        input: `다음 사용자 메시지의 의도를 분류하라: "${message}"
 
 JSON만 응답:
 {
   "type": "stock" | "market" | "sector" | "etf" | "portfolio" | "general",
-  "intent": "full_analysis" | "general_question" | "buy_timing" | "sell_timing" | "risk_check" | "earnings_check" | "overheat_check" | "valuation_check" | "compare_stocks" | "sector_analysis" | "recommendation" | "etf_analysis" | "portfolio_analysis" | "fallback",
+  "output_mode": "analysis_report" | "reason_answer" | "comparison_answer" | "fact_answer" | "concept_answer" | "strategy_answer" | "chat_answer",
+  "intent": "full_analysis" | "buy_timing" | "sell_timing" | "risk_check" | "earnings_check" | "overheat_check" | "valuation_check" | "compare_stocks" | "sector_analysis" | "recommendation" | "etf_analysis" | "portfolio_analysis" | "fallback",
   "ticker": "AAPL" | null,
   "name": "Apple" | null,
   "market": "US" | "KR",
   "sectorKey": null
 }
 
+★★ output_mode 분류 규칙 (가장 중요!) ★★
+
+1. analysis_report — 종목 전체 분석 요청일 때만 사용
+   예: "테슬라 분석해줘", "TSLA 어때?", "이 종목 괜찮아?", "테슬라 전망"
+
+2. reason_answer — 이유/원인 질문
+   예: "왜 올라?", "왜 내릴까?", "테슬라 왜 빠졌어?", "애플 상승 이유"
+
+3. comparison_answer — 비교 질문
+   예: "엔비디아랑 테슬라 비교해줘", "AAPL vs MSFT", "둘 중 뭐가 나아?"
+
+4. fact_answer — 가격/수치/사실/데이터 질문 (절대 분석 리포트 금지)
+   예: "테슬라 저번달에 얼마였지?", "현재가 얼마야?", "PER 몇이야?",
+       "시총 얼마야?", "52주 최고가?", "배당금 얼마?", "테슬라 CEO 누구?"
+
+5. concept_answer — 개념/용어 설명 질문
+   예: "PER가 뭐야?", "공매도 뜻", "RSI란?", "배당수익률이 뭐야?"
+
+6. strategy_answer — 전략/판단/타이밍 질문
+   예: "지금 들어가도 돼?", "언제 사는 게 좋아?", "매수 타이밍?", "손절할까?"
+
+7. chat_answer — 일반 대화/인사/기능 질문
+   예: "안녕", "뭐 할 수 있어?", "브리핑 보여줘", "고마워"
+
+★ 주의: 종목명이 포함되어도 fact_answer, reason_answer, strategy_answer일 수 있음.
+  "테슬라 저번달 가격" → fact_answer (분석 리포트 아님!)
+  "테슬라 왜 내려?" → reason_answer (분석 리포트 아님!)
+  "테슬라 지금 사도 돼?" → strategy_answer
+★ 의도가 애매하면 chat_answer로 분류 (분석 리포트로 가지 말 것)
+
 type 분류:
 - 종목명/티커 포함 → type:"stock"
-- ETF (QQQ, SPY 등) → type:"etf"
-- "시장 어때", "나스닥" → type:"market"
-- "반도체", "AI섹터" → type:"sector"
-- 종목+숫자 패턴 → type:"portfolio"
+- ETF → type:"etf"
+- "시장 어때" → type:"market"
+- "반도체 섹터" → type:"sector"
+- 종목+수량 → type:"portfolio"
 - 일반 대화 → type:"general"
 
-intent 분류 (핵심!):
-- "어때", "분석해줘", "전망", "괜찮아?" → intent:"full_analysis"
-- "언제 사", "매수" → intent:"buy_timing"
-- "언제 팔", "목표가" → intent:"sell_timing"
-- "위험", "리스크" → intent:"risk_check"
-- "실적", "어닝" → intent:"earnings_check"
-- "과열", "너무 올랐" → intent:"overheat_check"
-- "비싸", "고평가", "PER" → intent:"valuation_check"
+intent 분류:
+- "어때", "분석해줘" → intent:"full_analysis"
+- "언제 사" → intent:"buy_timing"
+- "언제 팔" → intent:"sell_timing"
+- "위험" → intent:"risk_check"
+- "실적" → intent:"earnings_check"
+- "과열" → intent:"overheat_check"
+- "비싸", "PER" → intent:"valuation_check"
 - "vs", "비교" → intent:"compare_stocks"
-- "추천", "뭐 살까" → intent:"recommendation"
-- 일반 대화 → intent:"fallback"
-- ★ 종목명은 포함하지만 분석/전망/매수/매도 요청이 아닌 단순 질문 → intent:"general_question"
-  예시: "테슬라 저번달에 얼마였어?", "애플 CEO 누구야?", "엔비디아 본사 어디야?",
-        "삼성전자 배당금 얼마야?", "테슬라 최근 뉴스 뭐야?", "애플 상장일이 언제야?",
-        "TSLA 52주 최고가는?", "테슬라 시총 얼마야?"`,
-        max_output_tokens: 300,
+- "추천" → intent:"recommendation"
+- 일반 → intent:"fallback"`,
+        max_output_tokens: 350,
     });
     try {
         const text = response.output_text.trim();
-        return JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || text);
+        const parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || text);
+        // output_mode 없으면 intent 기반으로 추론
+        if (!parsed.output_mode) {
+            if (parsed.intent === 'full_analysis') parsed.output_mode = 'analysis_report';
+            else if (parsed.intent === 'compare_stocks') parsed.output_mode = 'comparison_answer';
+            else if (['buy_timing', 'sell_timing'].includes(parsed.intent)) parsed.output_mode = 'strategy_answer';
+            else if (parsed.intent === 'fallback') parsed.output_mode = 'chat_answer';
+            else parsed.output_mode = 'fact_answer';
+        }
+        return parsed;
     } catch {
-        return { type: 'general', intent: 'fallback', ticker: null, name: null, market: 'US', sectorKey: null };
+        return { type: 'general', intent: 'fallback', output_mode: 'chat_answer', ticker: null, name: null, market: 'US', sectorKey: null };
     }
 }
 
-/**
- * 종목 컨텍스트 포함 간결한 Q&A 응답 (분석 리포트 아님)
- */
-async function answerStockQuestion(question, stockData, tone = 'normal') {
+// ══════════════════════════════════════════════════════════
+// 모드별 경량 응답 함수 (분석 리포트 아님!)
+// ══════════════════════════════════════════════════════════
+
+function buildStockContext(stockData) {
     const ticker = stockData.ticker || '';
     const name = stockData.companyName || ticker;
     const price = stockData.price?.current != null ? `$${stockData.price.current.toLocaleString()}` : '데이터 없음';
     const changePct = stockData.price?.changePct != null ? `${stockData.price.changePct > 0 ? '+' : ''}${stockData.price.changePct.toFixed(2)}%` : '';
     const f = stockData.fundamentals || {};
-    const newsText = (stockData.news || []).slice(0, 3).map(n => `- ${n.title} (${n.source})`).join('\n');
+    const t = stockData.technical || {};
+    const newsText = (stockData.news || []).slice(0, 5).map(n => `- ${n.title} (${n.source})`).join('\n');
 
-    const context = [
-        `[종목 정보] ${name} (${ticker})`,
+    return [
+        `[종목] ${name} (${ticker})`,
         `현재가: ${price} ${changePct}`,
         f.marketCap ? `시가총액: $${(f.marketCap / 1e9).toFixed(1)}B` : '',
         f.pe ? `PER: ${f.pe.toFixed(1)}` : '',
         f.eps ? `EPS: $${f.eps.toFixed(2)}` : '',
+        f.roe ? `ROE: ${(f.roe * 100).toFixed(1)}%` : '',
+        f.debtToEquity ? `D/E: ${f.debtToEquity.toFixed(1)}%` : '',
+        f.freeCashFlow ? `FCF: $${(f.freeCashFlow / 1e9).toFixed(2)}B` : '',
         f.dividendYield ? `배당수익률: ${(f.dividendYield * 100).toFixed(2)}%` : '',
         f['52WeekHigh'] ? `52주 최고: $${f['52WeekHigh']}` : '',
         f['52WeekLow'] ? `52주 최저: $${f['52WeekLow']}` : '',
+        t.rsi ? `RSI(14): ${t.rsi.toFixed(1)}` : '',
+        t.ema20 ? `EMA20: $${t.ema20.toFixed(2)}` : '',
         newsText ? `\n[최신 뉴스]\n${newsText}` : '',
     ].filter(Boolean).join('\n');
+}
 
-    const prompt = `사용자가 투자 비서 "예리"에게 종목 관련 질문을 했습니다.
-아래 데이터를 참고하여 질문에만 간결하게 답변하세요. (3~6줄)
-전체 분석 리포트를 작성하지 마세요. 질문에 대한 답만 하세요.
-"더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!" 를 마지막에 추가하세요.
+/** fact_answer: 가격/수치/사실만 짧게 답변 */
+async function answerFact(question, stockData, tone = 'normal') {
+    const name = stockData.companyName || stockData.ticker;
+    const ctx = buildStockContext(stockData);
+    const prompt = `사용자가 투자 비서 "예리"에게 종목의 특정 수치/사실을 물었습니다.
+아래 데이터에서 해당 수치만 정확히 찾아 2~4줄로 간결하게 답하세요.
+★ 절대 전체 분석 리포트를 작성하지 마세요.
+★ 묻는 수치/사실만 답하세요.
+마지막에: "더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!"
 
-${context}
+${ctx}
 
 사용자 질문: "${question}"`;
-
     return callOpenAI(prompt, false, tone);
 }
 
-module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };
+/** reason_answer: 왜 오르는지/내리는지 이유만 답변 */
+async function answerReason(question, stockData, tone = 'normal') {
+    const name = stockData.companyName || stockData.ticker;
+    const ctx = buildStockContext(stockData);
+    const prompt = `사용자가 투자 비서 "예리"에게 종목의 상승/하락 이유를 물었습니다.
+아래 데이터와 뉴스를 참고하여 핵심 이유 2~3가지만 짧게 요약하세요 (5~8줄).
+★ 절대 전체 분석 리포트를 작성하지 마세요.
+★ 이유/원인만 답하세요. 각 이유는 한 줄로.
+마지막에: "더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!"
+
+${ctx}
+
+사용자 질문: "${question}"`;
+    return callOpenAI(prompt, false, tone);
+}
+
+/** concept_answer: 용어/개념 설명만 답변 */
+async function answerConcept(question, tone = 'normal') {
+    const prompt = `사용자가 투자 비서 "예리"에게 투자 용어/개념을 물었습니다.
+해당 용어의 뜻을 3~5줄로 쉽게 설명하세요.
+★ 절대 종목 분석 리포트를 작성하지 마세요.
+★ 용어 설명만 하세요.
+예시를 들어 설명하면 좋습니다.
+
+사용자 질문: "${question}"`;
+    return callOpenAI(prompt, false, tone);
+}
+
+/** strategy_answer: 전략/판단/타이밍 의견 답변 */
+async function answerStrategy(question, stockData, tone = 'normal') {
+    const name = stockData.companyName || stockData.ticker;
+    const ctx = buildStockContext(stockData);
+    const prompt = `사용자가 투자 비서 "예리"에게 매수/매도 타이밍이나 전략적 판단을 물었습니다.
+아래 데이터를 참고하여 조건형 참고 의견으로 4~6줄로 짧게 답하세요.
+★ 절대 전체 분석 리포트를 작성하지 마세요.
+★ "~하면 검토할 수 있습니다", "~일 경우 주의가 필요합니다" 같은 조건형으로 서술.
+★ 직접적인 매수/매도 권유 금지.
+마지막에: "더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!"
+
+${ctx}
+
+사용자 질문: "${question}"`;
+    return callOpenAI(prompt, false, tone);
+}
+
+/** answerStockQuestion: 범용 간결 Q&A (이전 버전 호환) */
+async function answerStockQuestion(question, stockData, tone = 'normal') {
+    return answerFact(question, stockData, tone);
+}
+
+
+module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };
