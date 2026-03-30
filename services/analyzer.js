@@ -1188,9 +1188,38 @@ function buildStockContext(stockData) {
     ].filter(Boolean).join('\n');
 }
 
+function identifyMetricCategory(text) {
+    const textUpper = text.toUpperCase();
+    if (textUpper.includes('PER') || text.includes('주가수익비율')) return 'PER';
+    if (textUpper.includes('PBR') || text.includes('주가순자산비율')) return 'PBR';
+    if (textUpper.includes('ROE') || text.includes('자기자본이익률')) return 'ROE';
+    if (textUpper.includes('EPS') || text.includes('주당순이익')) return 'EPS';
+    if (text.includes('배당')) return 'DIVIDEND';
+    if (textUpper.includes('FCF') || text.includes('자유현금흐름') || text.includes('현금흐름')) return 'FCF';
+    if (textUpper.includes('D/E') || text.includes('부채비율') || textUpper.includes('DEBT')) return 'DEBT';
+    return null;
+}
+
 /** fact_answer: 가격/수치/사실만 짧게 답변 */
 async function answerFact(question, stockData, tone = 'normal') {
     const name = stockData.companyName || stockData.ticker;
+    const ticker = stockData.ticker;
+
+    // 1) 지표 중심 심층 탐색 (Deep Metric Retrieval)
+    const metricCategory = identifyMetricCategory(question);
+    if (metricCategory) {
+        const { fetchDeepMetric } = require('./data-fetcher');
+        const deepResult = await fetchDeepMetric(ticker, metricCategory);
+        
+        if (deepResult.status === 'SUCCESS') {
+            return `${name}(${ticker})의 ${deepResult.formattedText}`;
+        }
+        if (deepResult.status === 'NO_DIVIDEND') {
+            return `${name}(${ticker})은(는) ${deepResult.formattedText}`;
+        }
+        // NO_DATA인 경우 아래의 GPT Fallback 로직으로 넘어감
+    }
+
     const ctx = buildStockContext(stockData);
 
     // 데이터 가용성 요약 생성 — GPT가 대체 지표를 안내할 수 있도록
@@ -1223,8 +1252,8 @@ async function answerFact(question, stockData, tone = 'normal') {
 절대 전체 분석 리포트를 작성하지 마세요. 묻는 수치/사실만 답하세요.
 
 중요 규칙:
-- 질문한 지표 데이터가 있으면 → 해당 수치를 정확히 답변
-- 질문한 지표 데이터가 없으면 → "현재 데이터 소스에서 [지표명] 수치가 제공되지 않고 있습니다." 라고 안내한 뒤,
+- 질문한 지표 데이터가 있으면 → 해당 수치를 정확히 답변 (간결하게)
+- 질문한 지표 데이터가 없으면 → "현재 연결된 데이터 소스 기준으로 해당 지표를 확인하지 못했습니다." 라고 안내한 뒤,
   확인 가능한 대체 지표 2~3개를 짧게 추천 (예: "대신 PER, EPS, FCF는 확인 가능합니다.")
 - "데이터 없음"이라고만 쓰지 마세요. 사용자가 다음 행동을 할 수 있도록 안내하세요.
 

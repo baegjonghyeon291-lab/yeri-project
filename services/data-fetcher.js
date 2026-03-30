@@ -912,4 +912,155 @@ function computeDataReliability(data) {
     return summary;
 }
 
-module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData, getApiStats, computeDataReliability };
+// ═══════════════════════════════════════════════════════
+// ⑫ DEEP METRIC RETRIEVAL (fact_answer 전용 다중 소스 탐색)
+// ═══════════════════════════════════════════════════════
+async function fetchDeepMetric(ticker, metricClass) {
+    if (!metricClass) return { status: 'NO_DATA' };
+
+    console.log(`[DeepMetric] 🔍 ${ticker}의 ${metricClass} 지표 심층 탐색 시작...`);
+
+    // metricClass 별 처리 로직
+    const extractors = {
+        'PER': {
+            fmp: (q, m) => q?.pe ?? m?.peRatioTTM ?? null,
+            finnhub: (m) => m?.peNormalizedAnnual ?? m?.peBasicExclExtraTTM ?? null,
+            eodhd: (hi, val) => hi?.PERatio ?? val?.TrailingPE ?? val?.ForwardPE ?? null,
+            yahoo: (f) => f?.peRatio ?? f?.pe ?? null,
+            format: v => `PER은 ${parseFloat(v).toFixed(2)}배입니다.`
+        },
+        'PBR': {
+            fmp: (q, m) => m?.pbRatioTTM ?? null,
+            finnhub: (m) => m?.pbAnnual ?? null,
+            eodhd: (hi, val) => val?.PriceBookMRQ ?? null,
+            yahoo: (f) => f?.pbRatio ?? f?.priceToBook ?? null,
+            format: v => `PBR은 ${parseFloat(v).toFixed(2)}배입니다.`
+        },
+        'ROE': {
+            fmp: (q, m) => m?.roeTTM != null ? m.roeTTM * 100 : null,
+            finnhub: (m) => m?.roeAnnual ?? m?.roeTTM ?? null,
+            eodhd: (hi, val) => hi?.ReturnOnEquityTTM != null ? hi.ReturnOnEquityTTM * 100 : null,
+            yahoo: (f) => f?.roe != null ? f.roe * 100 : null,
+            format: v => `ROE는 ${parseFloat(v).toFixed(1)}%입니다.`
+        },
+        'EPS': {
+            fmp: (q, m) => q?.eps ?? null,
+            finnhub: (m) => m?.epsNormalizedAnnual ?? null,
+            eodhd: (hi, val) => hi?.EPS ?? null,
+            yahoo: (f) => f?.eps ?? null,
+            format: v => `EPS(주당순이익)는 $${parseFloat(v).toFixed(2)}입니다.`
+        },
+        'DIVIDEND': {
+            fmp: (q, m) => m?.dividendYieldTTM != null ? m.dividendYieldTTM * 100 : (m?.dividendYieldPercentageTTM ?? null),
+            finnhub: (m) => m?.dividendYieldIndicatedAnnual ?? m?.dividendYield5Y ?? null,
+            eodhd: (hi, val) => hi?.DividendYield != null ? hi.DividendYield * 100 : null,
+            yahoo: (f) => f?.dividendYield != null ? f.dividendYield * 100 : null,
+            format: v => `배당수익률은 ${parseFloat(v).toFixed(2)}%입니다.`
+        },
+        'FCF': {
+            fmp: (q, m) => m?.freeCashFlowPerShareTTM ? (m.freeCashFlowPerShareTTM * (q?.sharesOutstanding || 1)) : null,
+            finnhub: (m) => null, // Finnhub FCF is complex
+            eodhd: (hi, val) => null,
+            yahoo: (f) => f?.freeCashFlow ?? null,
+            format: v => `자유현금흐름(FCF)은 $${(parseFloat(v)/1e9).toFixed(2)}B (십억 달러)입니다.`
+        },
+        'DEBT': {
+            fmp: (q, m) => m?.debtToEquityTTM ?? null,
+            finnhub: (m) => m?.totalDebt_totalEquityAnnual ?? null,
+            eodhd: (hi, val) => null,
+            yahoo: (f) => f?.debtToEquity ?? null,
+            format: v => `부채비율(D/E)은 ${(parseFloat(v)).toFixed(2)}입니다.`
+        }
+    };
+
+    const ex = extractors[metricClass];
+    if (!ex) return { status: 'NO_DATA' };
+
+    const sources = [
+        {
+            name: 'Yahoo',
+            fetch: async () => {
+                const f = await yahoo.getYahooFundamentals(ticker);
+                return f ? ex.yahoo(f) : null;
+            }
+        },
+        {
+            name: 'Finnhub',
+            fetch: async () => {
+                const key = process.env.FINNHUB_API_KEY;
+                if (!key) return null;
+                const res = await axios.get(`https://finnhub.io/api/v1/stock/metric?symbol=${ticker}&metric=all&token=${key}`, { timeout: 3000 }).catch(()=>null);
+                return res?.data?.metric ? ex.finnhub(res.data.metric) : null;
+            }
+        },
+        {
+            name: 'FMP',
+            fetch: async () => {
+                const key = process.env.FMP_API_KEY;
+                if (!key) return null;
+                const [qRes, mRes] = await Promise.all([
+                    axios.get(`https://financialmodelingprep.com/api/v3/quote/${ticker}?apikey=${key}`, { timeout: 3000 }).catch(()=>null),
+                    axios.get(`https://financialmodelingprep.com/api/v3/key-metrics-ttm/${ticker}?apikey=${key}`, { timeout: 3000 }).catch(()=>null)
+                ]);
+                return ex.fmp(qRes?.data?.[0], mRes?.data?.[0]);
+            }
+        },
+        {
+            name: 'EODHD',
+            fetch: async () => {
+                const key = process.env.EODHD_API_KEY;
+                if (!key) return null;
+                const res = await axios.get(`https://eodhd.com/api/fundamentals/${ticker}.US?api_token=${key}&fmt=json`, { timeout: 3000 }).catch(()=>null);
+                return res?.data ? ex.eodhd(res.data.Highlights, res.data.Valuation) : null;
+            }
+        }
+    ];
+
+    let foundValue = null;
+    let foundSource = null;
+
+    for (const src of sources) {
+        try {
+            const val = await src.fetch();
+            if (val != null && !isNaN(parseFloat(val))) {
+                foundValue = val;
+                foundSource = src.name;
+                break;
+            }
+        } catch(e) {}
+    }
+
+    if (foundValue != null) {
+        // 배당 0점대 무배당 처리
+        if (metricClass === 'DIVIDEND' && parseFloat(foundValue) === 0) {
+            console.log(`[DeepMetric] 🔍 ${ticker} 배당 0 확인 -> NO_DIVIDEND`);
+            return { status: 'NO_DIVIDEND', formattedText: '현재 배당을 지급하지 않습니다 (무배당).' };
+        }
+        
+        console.log(`[DeepMetric] ✅ ${ticker} ${metricClass} 찾음: ${foundValue} (출처: ${foundSource})`);
+        return {
+            status: 'SUCCESS',
+            value: foundValue,
+            source: foundSource,
+            formattedText: ex.format(foundValue) + ` (출처: ${foundSource})`
+        };
+    }
+
+    // 만약 계속 0이 나오거나 null이면 배당은 주로 안 주는 기업일 확률이 높음
+    if (metricClass === 'DIVIDEND') {
+        const key = process.env.FMP_API_KEY;
+        if (key) {
+            try {
+                const divRes = await axios.get(`https://financialmodelingprep.com/api/v3/historical-price-full/stock_dividend/${ticker}?apikey=${key}`, { timeout: 3000 });
+                if (!divRes.data?.historical?.length) {
+                   return { status: 'NO_DIVIDEND', formattedText: '현재 배당을 지급하지 않습니다 (무배당).' };
+                }
+            } catch(e) {}
+        }
+    }
+
+    console.log(`[DeepMetric] ❌ ${ticker} ${metricClass} 끝내 못찾음 -> NO_DATA`);
+    return { status: 'NO_DATA' };
+}
+
+module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData, getApiStats, computeDataReliability, fetchDeepMetric };
