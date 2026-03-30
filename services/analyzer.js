@@ -1164,18 +1164,22 @@ function buildStockContext(stockData) {
     const changePct = formatSafe(stockData.price?.changePct, 2, stockData.price?.changePct > 0 ? '+' : '', '%') || '';
     const f = stockData.fundamentals || {};
     const t = stockData.technical || {};
+    const p = stockData.price || {};
     const newsText = (stockData.news || []).slice(0, 5).map(n => `- ${n.title} (${n.source})`).join('\n');
 
     return [
         `[종목] ${name} (${ticker})`,
         `현재가: ${price} ${changePct}`,
         f.marketCap != null ? `시가총액: ${formatSafe(f.marketCap / 1e9, 1, '$', 'B') || '데이터 없음'}` : '',
-        formatSafe(f.pe, 1, 'PER: ') || '',
+        formatSafe(f.pe != null ? f.pe : f.peRatio, 1, 'PER: ') || '',
         formatSafe(f.eps, 2, 'EPS: $') || '',
         f.roe != null ? (formatSafe(f.roe * 100, 1, 'ROE: ', '%') || '') : '',
         f.debtToEquity != null ? (formatSafe(f.debtToEquity, 1, 'D/E: ', '%') || '') : '',
         f.freeCashFlow != null ? `FCF: ${formatSafe(f.freeCashFlow / 1e9, 2, '$', 'B') || '데이터 없음'}` : '',
         f.dividendYield != null ? (formatSafe(f.dividendYield * 100, 2, '배당수익률: ', '%') || '') : '',
+        f.pbRatio != null ? formatSafe(f.pbRatio, 2, 'PBR: ') : '',
+        f.revenueGrowthYoY != null ? (formatSafe(f.revenueGrowthYoY * 100, 1, '매출성장률: ', '%') || '') : '',
+        f.netMargin != null ? (formatSafe(f.netMargin * 100, 1, '순이익률: ', '%') || '') : '',
         f['52WeekHigh'] != null ? `52주 최고: $${f['52WeekHigh']}` : '',
         f['52WeekLow'] != null ? `52주 최저: $${f['52WeekLow']}` : '',
         formatSafe(t.rsi, 1, 'RSI(14): ') || '',
