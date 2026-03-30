@@ -1036,55 +1036,53 @@ JSON만 응답:
   "sectorKey": null
 }
 
-★★ output_mode 분류 규칙 (가장 중요!) ★★
+output_mode 분류 (가장 중요!):
 
-1. analysis_report — 종목 전체 분석 요청일 때만 사용
-   예: "테슬라 분석해줘", "TSLA 어때?", "이 종목 괜찮아?", "테슬라 전망"
+1. analysis_report: 종목 전체 분석 요청. "분석해줘", "전망", "전체 분석" 같은 명시적 단어가 있을 때만.
+   예: "테슬라 분석해줘", "TSLA 전망"
 
-2. reason_answer — 이유/원인 질문
-   예: "왜 올라?", "왜 내릴까?", "테슬라 왜 빠졌어?", "애플 상승 이유"
+2. reason_answer: 이유/원인 질문.
+   예: "왜 올라?", "왜 내릴까?", "테슬라 왜 빠졌어?"
 
-3. comparison_answer — 비교 질문
-   예: "엔비디아랑 테슬라 비교해줘", "AAPL vs MSFT", "둘 중 뭐가 나아?"
+3. comparison_answer: 비교 질문.
+   예: "엔비디아랑 테슬라 비교해줘", "AAPL vs MSFT"
 
-4. fact_answer — 가격/수치/사실/데이터 질문 (절대 분석 리포트 금지)
-   예: "테슬라 저번달에 얼마였지?", "현재가 얼마야?", "PER 몇이야?",
-       "시총 얼마야?", "52주 최고가?", "배당금 얼마?", "테슬라 CEO 누구?"
+4. fact_answer: 가격/수치/사실/데이터 질문. 절대 분석 리포트 금지.
+   예: "테슬라 저번달 얼마?", "현재가?", "PER 몇?", "시총?", "EPS 얼마?", "얼마나 올랐어?"
 
-5. concept_answer — 개념/용어 설명 질문
-   예: "PER가 뭐야?", "공매도 뜻", "RSI란?", "배당수익률이 뭐야?"
+5. concept_answer: 개념/용어 설명.
+   예: "PER가 뭐야?", "공매도 뜻", "RSI란?"
 
-6. strategy_answer — 전략/판단/타이밍 질문
-   예: "지금 들어가도 돼?", "언제 사는 게 좋아?", "매수 타이밍?", "손절할까?"
+6. strategy_answer: 전략/판단/타이밍/평가 질문.
+   예: "지금 들어가도 돼?", "언제 사?", "매수 타이밍?", "손절할까?"
+   *** 핵심: 종목명 + "괜찮아?/어때?/살만해?/위험해?/지금 어때?/들어가도 돼?" 같은 판단요청은 반드시 strategy_answer!
+   예: "테슬라 괜찮아?" -> strategy_answer (chat_answer 아님!)
+   예: "엔비디아 어때?" -> strategy_answer (chat_answer 아님!)
+   예: "아이리스 위험해?" -> strategy_answer (chat_answer 아님!)
 
-7. chat_answer — 일반 대화/인사/기능 질문
-   예: "안녕", "뭐 할 수 있어?", "브리핑 보여줘", "고마워"
-
-★ 주의: 종목명이 포함되어도 fact_answer, reason_answer, strategy_answer일 수 있음.
-  "테슬라 저번달 가격" → fact_answer (분석 리포트 아님!)
-  "테슬라 왜 내려?" → reason_answer (분석 리포트 아님!)
-  "테슬라 지금 사도 돼?" → strategy_answer
-★ 의도가 애매하면 chat_answer로 분류 (분석 리포트로 가지 말 것)
+7. chat_answer: 종목명이 없는 순수 일반 대화/인사만.
+   예: "안녕", "뭐 할 수 있어?", "고마워"
+   *** 종목명이 포함된 질문이면 절대 chat_answer 아님!
 
 type 분류:
-- 종목명/티커 포함 → type:"stock"
-- ETF → type:"etf"
-- "시장 어때" → type:"market"
-- "반도체 섹터" → type:"sector"
-- 종목+수량 → type:"portfolio"
-- 일반 대화 → type:"general"
+- 종목명/티커 포함 -> type:"stock"
+- ETF -> type:"etf"
+- "시장 어때" -> type:"market"
+- "반도체 섹터" -> type:"sector"
+- 종목+수량 -> type:"portfolio"
+- 일반 대화 -> type:"general"
 
 intent 분류:
-- "어때", "분석해줘" → intent:"full_analysis"
-- "언제 사" → intent:"buy_timing"
-- "언제 팔" → intent:"sell_timing"
-- "위험" → intent:"risk_check"
-- "실적" → intent:"earnings_check"
-- "과열" → intent:"overheat_check"
-- "비싸", "PER" → intent:"valuation_check"
-- "vs", "비교" → intent:"compare_stocks"
-- "추천" → intent:"recommendation"
-- 일반 → intent:"fallback"`,
+- "분석해줘" -> intent:"full_analysis"
+- "언제 사" -> intent:"buy_timing"
+- "언제 팔" -> intent:"sell_timing"
+- "위험" -> intent:"risk_check"
+- "실적" -> intent:"earnings_check"
+- "과열" -> intent:"overheat_check"
+- "비싸" -> intent:"valuation_check"
+- "vs","비교" -> intent:"compare_stocks"
+- "추천" -> intent:"recommendation"
+- 일반 -> intent:"fallback"`,
         max_output_tokens: 350,
     });
     try {
@@ -1094,14 +1092,28 @@ intent 분류:
         if (!parsed.output_mode) {
             if (parsed.intent === 'full_analysis') parsed.output_mode = 'analysis_report';
             else if (parsed.intent === 'compare_stocks') parsed.output_mode = 'comparison_answer';
-            else if (['buy_timing', 'sell_timing'].includes(parsed.intent)) parsed.output_mode = 'strategy_answer';
+            else if (['buy_timing', 'sell_timing', 'risk_check', 'overheat_check'].includes(parsed.intent)) parsed.output_mode = 'strategy_answer';
             else if (parsed.intent === 'fallback') parsed.output_mode = 'chat_answer';
             else parsed.output_mode = 'fact_answer';
+        }
+        // 안전장치: 종목명이 포함된 질문인데 chat_answer로 분류된 경우 strategy_answer로 교정
+        if (parsed.output_mode === 'chat_answer' && parsed.type === 'stock') {
+            parsed.output_mode = 'strategy_answer';
         }
         return parsed;
     } catch {
         return { type: 'general', intent: 'fallback', output_mode: 'chat_answer', ticker: null, name: null, market: 'US', sectorKey: null };
     }
+}
+
+// ══════════════════════════════════════════════════════════
+// 숫자 안전 포맷 유틸리티 (toFixed 크래시 완전 방지)
+// ══════════════════════════════════════════════════════════
+function formatSafe(value, decimals = 2, prefix = '', suffix = '') {
+    if (value == null) return null;
+    const num = typeof value === 'number' ? value : Number(value);
+    if (isNaN(num)) return typeof value === 'string' ? `${prefix}${value}${suffix}` : null;
+    return `${prefix}${num.toFixed(decimals)}${suffix}`;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1111,8 +1123,9 @@ intent 분류:
 function buildStockContext(stockData) {
     const ticker = stockData.ticker || '';
     const name = stockData.companyName || ticker;
-    const price = stockData.price?.current != null ? `$${stockData.price.current.toLocaleString()}` : '데이터 없음';
-    const changePct = stockData.price?.changePct != null ? `${stockData.price.changePct > 0 ? '+' : ''}${stockData.price.changePct.toFixed(2)}%` : '';
+    const priceVal = stockData.price?.current;
+    const price = priceVal != null ? `$${Number(priceVal).toLocaleString()}` : '데이터 없음';
+    const changePct = formatSafe(stockData.price?.changePct, 2, stockData.price?.changePct > 0 ? '+' : '', '%') || '';
     const f = stockData.fundamentals || {};
     const t = stockData.technical || {};
     const newsText = (stockData.news || []).slice(0, 5).map(n => `- ${n.title} (${n.source})`).join('\n');
@@ -1120,17 +1133,17 @@ function buildStockContext(stockData) {
     return [
         `[종목] ${name} (${ticker})`,
         `현재가: ${price} ${changePct}`,
-        f.marketCap ? `시가총액: $${(f.marketCap / 1e9).toFixed(1)}B` : '',
-        f.pe ? `PER: ${f.pe.toFixed(1)}` : '',
-        f.eps ? `EPS: $${f.eps.toFixed(2)}` : '',
-        f.roe ? `ROE: ${(f.roe * 100).toFixed(1)}%` : '',
-        f.debtToEquity ? `D/E: ${f.debtToEquity.toFixed(1)}%` : '',
-        f.freeCashFlow ? `FCF: $${(f.freeCashFlow / 1e9).toFixed(2)}B` : '',
-        f.dividendYield ? `배당수익률: ${(f.dividendYield * 100).toFixed(2)}%` : '',
-        f['52WeekHigh'] ? `52주 최고: $${f['52WeekHigh']}` : '',
-        f['52WeekLow'] ? `52주 최저: $${f['52WeekLow']}` : '',
-        t.rsi ? `RSI(14): ${t.rsi.toFixed(1)}` : '',
-        t.ema20 ? `EMA20: $${t.ema20.toFixed(2)}` : '',
+        f.marketCap != null ? `시가총액: ${formatSafe(f.marketCap / 1e9, 1, '$', 'B') || '데이터 없음'}` : '',
+        formatSafe(f.pe, 1, 'PER: ') || '',
+        formatSafe(f.eps, 2, 'EPS: $') || '',
+        f.roe != null ? (formatSafe(f.roe * 100, 1, 'ROE: ', '%') || '') : '',
+        f.debtToEquity != null ? (formatSafe(f.debtToEquity, 1, 'D/E: ', '%') || '') : '',
+        f.freeCashFlow != null ? `FCF: ${formatSafe(f.freeCashFlow / 1e9, 2, '$', 'B') || '데이터 없음'}` : '',
+        f.dividendYield != null ? (formatSafe(f.dividendYield * 100, 2, '배당수익률: ', '%') || '') : '',
+        f['52WeekHigh'] != null ? `52주 최고: $${f['52WeekHigh']}` : '',
+        f['52WeekLow'] != null ? `52주 최저: $${f['52WeekLow']}` : '',
+        formatSafe(t.rsi, 1, 'RSI(14): ') || '',
+        formatSafe(t.ema20, 2, 'EMA20: $') || '',
         newsText ? `\n[최신 뉴스]\n${newsText}` : '',
     ].filter(Boolean).join('\n');
 }
@@ -1141,8 +1154,7 @@ async function answerFact(question, stockData, tone = 'normal') {
     const ctx = buildStockContext(stockData);
     const prompt = `사용자가 투자 비서 "예리"에게 종목의 특정 수치/사실을 물었습니다.
 아래 데이터에서 해당 수치만 정확히 찾아 2~4줄로 간결하게 답하세요.
-★ 절대 전체 분석 리포트를 작성하지 마세요.
-★ 묻는 수치/사실만 답하세요.
+절대 전체 분석 리포트를 작성하지 마세요. 묻는 수치/사실만 답하세요.
 마지막에: "더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!"
 
 ${ctx}
@@ -1157,8 +1169,7 @@ async function answerReason(question, stockData, tone = 'normal') {
     const ctx = buildStockContext(stockData);
     const prompt = `사용자가 투자 비서 "예리"에게 종목의 상승/하락 이유를 물었습니다.
 아래 데이터와 뉴스를 참고하여 핵심 이유 2~3가지만 짧게 요약하세요 (5~8줄).
-★ 절대 전체 분석 리포트를 작성하지 마세요.
-★ 이유/원인만 답하세요. 각 이유는 한 줄로.
+절대 전체 분석 리포트를 작성하지 마세요. 이유/원인만 답하세요.
 마지막에: "더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!"
 
 ${ctx}
@@ -1171,8 +1182,7 @@ ${ctx}
 async function answerConcept(question, tone = 'normal') {
     const prompt = `사용자가 투자 비서 "예리"에게 투자 용어/개념을 물었습니다.
 해당 용어의 뜻을 3~5줄로 쉽게 설명하세요.
-★ 절대 종목 분석 리포트를 작성하지 마세요.
-★ 용어 설명만 하세요.
+절대 종목 분석 리포트를 작성하지 마세요. 용어 설명만 하세요.
 예시를 들어 설명하면 좋습니다.
 
 사용자 질문: "${question}"`;
@@ -1185,9 +1195,9 @@ async function answerStrategy(question, stockData, tone = 'normal') {
     const ctx = buildStockContext(stockData);
     const prompt = `사용자가 투자 비서 "예리"에게 매수/매도 타이밍이나 전략적 판단을 물었습니다.
 아래 데이터를 참고하여 조건형 참고 의견으로 4~6줄로 짧게 답하세요.
-★ 절대 전체 분석 리포트를 작성하지 마세요.
-★ "~하면 검토할 수 있습니다", "~일 경우 주의가 필요합니다" 같은 조건형으로 서술.
-★ 직접적인 매수/매도 권유 금지.
+절대 전체 분석 리포트를 작성하지 마세요.
+"~하면 검토할 수 있습니다", "~일 경우 주의가 필요합니다" 같은 조건형으로 서술.
+직접적인 매수/매도 권유 금지.
 마지막에: "더 자세한 분석이 필요하시면 '${name} 분석해줘'라고 말씀해 주세요!"
 
 ${ctx}
@@ -1200,6 +1210,5 @@ ${ctx}
 async function answerStockQuestion(question, stockData, tone = 'normal') {
     return answerFact(question, stockData, tone);
 }
-
 
 module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };
