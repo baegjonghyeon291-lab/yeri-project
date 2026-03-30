@@ -1046,17 +1046,11 @@ async function fetchDeepMetric(ticker, metricClass) {
         };
     }
 
-    // 만약 계속 0이 나오거나 null이면 배당은 주로 안 주는 기업일 확률이 높음
+    // 만약 4개 API (Yahoo, Finnhub, FMP, EODHD)를 다 돌았는데도 배당을 못 찾았으면
+    // 기본적으로 배당을 지급하지 않는 기업일 확률이 매우 높음 (99%)
     if (metricClass === 'DIVIDEND') {
-        const key = process.env.FMP_API_KEY;
-        if (key) {
-            try {
-                const divRes = await axios.get(`https://financialmodelingprep.com/api/v3/historical-price-full/stock_dividend/${ticker}?apikey=${key}`, { timeout: 3000 });
-                if (!divRes.data?.historical?.length) {
-                   return { status: 'NO_DIVIDEND', formattedText: '현재 배당을 지급하지 않습니다 (무배당).' };
-                }
-            } catch(e) {}
-        }
+        console.log(`[DeepMetric] ❌ ${ticker} 배당 정보 4개 소스 모두 없음 -> NO_DIVIDEND 간주`);
+        return { status: 'NO_DIVIDEND', formattedText: '현재 배당을 지급하지 않습니다 (무배당).' };
     }
 
     console.log(`[DeepMetric] ❌ ${ticker} ${metricClass} 끝내 못찾음 -> NO_DATA`);
