@@ -178,6 +178,23 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
+        // ★★ 개념/용어 질문 프리라우팅 ★★
+        // [지표명] + [뭐야/뜻/무엇/의미] 패턴 → concept_answer 직행
+        const METRIC_KEYWORDS = ['PER', 'PBR', 'EPS', 'ROE', 'ROA', 'RSI', 'MACD', 'FCF', 'BPS', 'PEG',
+            'D/E', '부채비율', '시가총액', '배당', '공매도', '공매수', '볼린저', '이동평균', 'EMA', 'SMA',
+            '순이익률', '영업이익', '매출성장', '자유현금흐름', '시총'];
+        const CONCEPT_SUFFIXES = ['뭐야', '뭐예요', '뭐야?', '뜻', '뜻이', '무엇', '의미', '란', '이란', '이 뭐야', '가 뭐야', '란?', '이란?', '뜻이 뭐야', '뜻이 뭐예요'];
+        const textLower = text.toLowerCase().replace(/\s+/g, ' ').trim();
+        const hasMetricWord = METRIC_KEYWORDS.some(k => textLower.includes(k.toLowerCase()));
+        const hasConceptSuffix = CONCEPT_SUFFIXES.some(s => textLower.includes(s));
+        const hasStockName = resolveStock(text) || (intent.type === 'stock' && intent.ticker);
+        if (hasMetricWord && hasConceptSuffix && !hasStockName) {
+            console.log(`[API /chat] ▶ concept_answer 프리라우팅: "${text}"`);
+            const reply = await answerConcept(text, 'normal');
+            messages.push({ type: 'text', content: reply });
+            return res.json({ messages });
+        }
+
         // 1. 종목 비교 분석
         const COMPARISON_KEYWORDS = ['vs', 'VS', 'versus', '비교', '차이', '이랑', '랑', '대비', '어느게나아', '뭐가나아', '뭐가좋아', '둘중'];
         const hasComparisonKeyword = COMPARISON_KEYWORDS.some(k => text.replace(/\s/g, '').includes(k));
@@ -369,6 +386,48 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
+        // ★★ MED/LOW인데 [티커/종목명] + [지표] + [얼마/몇] 패턴이면 지표 키워드 제거 후 재시도 ★★
+        const FACT_METRIC_KEYWORDS = ['EPS', 'PER', 'PBR', 'ROE', 'ROA', 'RSI', 'FCF', 'BPS', 'PEG', 'D/E',
+            '얼마', '몇', '수치', '값', '시총', '시가총액', '부채비율', '배당', '순이익', '매출'];
+        const FACT_SUFFIXES = ['얼마', '몇', '얼마야', '몇이야', '얼마예요', '몇이예요', '얼마냐', '얼마임'];
+        const hasFactMetric = FACT_METRIC_KEYWORDS.some(k => text.toUpperCase().includes(k.toUpperCase()));
+        const hasFactSuffix = FACT_SUFFIXES.some(s => text.includes(s));
+
+        if ((suggestion.tier === 'MED' || suggestion.tier === 'LOW') && hasFactMetric && hasFactSuffix) {
+            // 지표 키워드 제거 후 티커만 추출해서 재시도
+            let strippedText = text;
+            for (const mk of FACT_METRIC_KEYWORDS) {
+                strippedText = strippedText.replace(new RegExp(mk, 'gi'), '');
+            }
+            for (const fs of FACT_SUFFIXES) {
+                strippedText = strippedText.replace(new RegExp(fs, 'g'), '');
+            }
+            strippedText = strippedText.replace(/[??\.\s]+$/g, '').trim();
+            console.log(`[API /chat] ▶ fact_answer 재시도: "${text}" → stripped="${strippedText}"`);
+
+            if (strippedText.length > 0) {
+                const retryExtracted = extractCompanyName(strippedText) || strippedText;
+                const retrySuggestion = suggestCandidates(retryExtracted);
+
+                if (retrySuggestion.tier === 'HIGH' && retrySuggestion.resolved) {
+                    let ticker = retrySuggestion.resolved.ticker;
+                    let name = retrySuggestion.resolved.name;
+                    let market = retrySuggestion.resolved.market;
+                    let corpCode = retrySuggestion.resolved.corpCode || null;
+                    if (market === 'KR') {
+                        const krInfo = resolveKoreanTicker(ticker);
+                        if (krInfo) { ticker = toFinnhubKRFormat(krInfo.ticker); name = krInfo.name; corpCode = krInfo.corpCode; }
+                        else { ticker = toFinnhubKRFormat(ticker); }
+                    }
+                    console.log(`[API /chat] ▶ fact_answer 재시도 성공: ${ticker} (${name})`);
+                    const data = await fetchAllStockData(ticker, name, corpCode);
+                    const reply = await answerFact(text, data, 'normal');
+                    messages.push({ type: 'text', content: reply });
+                    return res.json({ messages });
+                }
+            }
+        }
+
         // MED / LOW (유사 종목 및 대체 추천 종목 제시)
         if ((suggestion.tier === 'MED' || suggestion.tier === 'LOW') && isStockIntent) {
             let candidatesToShow = suggestion.candidates || [];
@@ -409,7 +468,7 @@ app.post('/api/chat', async (req, res) => {
                 const currency = c.ticker.endsWith('.KS') || c.ticker.endsWith('.KQ') ? '₩' : '$';
                 const dStr = c.desc ? ` (${c.desc})` : '';
                 const priceInfo = c.price != null
-                    ? ` / ${currency}${c.price.toLocaleString()} / ${c.changePct > 0 ? '+' : ''}${c.changePct?.toFixed(2) || '0.00'}%`
+                    ? ` / ${currency}${c.price.toLocaleString()} / ${c.changePct > 0 ? '+' : ''}${c.changePct != null ? Number(c.changePct).toFixed(2) : '0.00'}%`
                     : ' / 가격 정보 없음';
                 
                 contentLines.push(`• ${c.ticker} - ${c.name}${dStr}${priceInfo}`);
