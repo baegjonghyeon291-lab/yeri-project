@@ -44,7 +44,7 @@ const {
     analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison,
     analyzeETF, analyzePortfolio, analyzeRecommendation,
     analyzeMarket, analyzeSector, classifyQuery, fallbackChat,
-    answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy,
+    answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy, answerComparisonFollowup,
     computeScore, normalizeData, validateData, computeScore6, classifyNewsItems
 } = require('./services/analyzer');
 const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability, getAuditSnapshot } = require('./services/data-fetcher');
@@ -205,7 +205,7 @@ app.post('/api/chat', async (req, res) => {
         const FOLLOWUP_KEYWORDS = ['그럼', '그러면', '언제', '얼마나', '지금', '더', '회복', '돌파',
             '오를까', '내릴까', '위험해', '사도', '팔까', '해도', '매수', '매도', '추가매수',
             '얼마', '목표', '가능', '어때', '괜찮', '좋아', '좋을', '나아', '나을',
-            '살만', '들어가', '어떨까', '왜', '빠졌', '올랐', '떨어', '급등', '급락',
+            '살만', '들어가', '어떨까', '왜', '빠졌', '올랐', '떨어', '급등', '급락', '누가',
             '줘', '알려', '가르쳐', '수익률', '배당', '시총', '부채', '현금흐름', '자산', '비싸',
             'ROE', 'PER', 'EPS', 'PBR', 'RSI', 'FCF', 'MACD', 'EMA'];
         const currentStockInText = resolveStock(text);
@@ -213,6 +213,24 @@ app.post('/api/chat', async (req, res) => {
         const isFollowup = !currentStockInText && hasFollowupPattern && sessions.isTickerContextValid(chatId);
 
         if (isFollowup) {
+            if (session.isComparison && session.comparisonStocks && session.comparisonStocks.length === 2) {
+                console.log(`[API /chat] ★ 비교 후속 질문 감지! "${text}" → 직전 비교종목 상속: ${session.comparisonStocks[0].ticker} vs ${session.comparisonStocks[1].ticker}`);
+                const [dataA, dataB] = await Promise.all([
+                    fetchAllStockData(session.comparisonStocks[0].ticker, session.comparisonStocks[0].name, session.comparisonStocks[0].corpCode),
+                    fetchAllStockData(session.comparisonStocks[1].ticker, session.comparisonStocks[1].name, session.comparisonStocks[1].corpCode)
+                ]);
+                
+                const outputMode = intent.output_mode || 'strategy_answer';
+                console.log(`[API /chat] ▶ comparison follow-up output_mode: ${outputMode}`);
+
+                const reply = await answerComparisonFollowup(text, dataA, dataB, 'normal');
+                messages.push({ type: 'text', content: reply });
+                
+                sessions.update(chatId, { lastTickerTime: Date.now() });
+                return res.json({ messages });
+            }
+
+            // 일반 단일 종목 후속 질문
             const lastTicker = session.lastAnalyzedTicker;
             const lastName = session.lastAnalyzedName;
             const lastMarket = session.lastAnalyzedMarket;
@@ -290,6 +308,16 @@ app.post('/api/chat', async (req, res) => {
                 fetchAllStockData(tickerB, nameB, stocks.stockB.corpCode || null),
             ]);
 
+            // 비교 결과 세션 갱신 (단일/비교 스위칭)
+            sessions.update(chatId, {
+                isComparison: true,
+                comparisonStocks: [
+                    { ticker: tickerA, name: nameA, market: stocks.stockA.market, corpCode: stocks.stockA.corpCode || null },
+                    { ticker: tickerB, name: nameB, market: stocks.stockB.market, corpCode: stocks.stockB.corpCode || null }
+                ],
+                lastTickerTime: Date.now()
+            });
+
             const report = await analyzeStockComparison(dataA, dataB, useDeep, 'normal');
             messages.push({ type: 'analysis', content: report, ticker: `${tickerA} vs ${tickerB}`, name: `${nameA} vs ${nameB}` });
             return res.json({ messages });
@@ -355,7 +383,7 @@ app.post('/api/chat', async (req, res) => {
             }
             
             // 세션 갱신 로직: outputMode에 따른 early return 전에 세션을 갱신해야 이력이 남음
-            sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastAnalyzedCorpCode: corpCode, lastTickerTime: Date.now() });
+            sessions.update(chatId, { isComparison: false, lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastAnalyzedCorpCode: corpCode, lastTickerTime: Date.now() });
 
             // 3) fact_answer — 수치/사실 간결 답변
             if (outputMode === 'fact_answer') {

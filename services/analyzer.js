@@ -1320,6 +1320,26 @@ async function answerConcept(question, tone = 'normal') {
     return callOpenAI(prompt, false, tone);
 }
 
+/** comparison_followup_answer: 비교 질문에 대한 간단한 팩트/전략형 후속 논평 */
+async function answerComparisonFollowup(question, dataA, dataB, tone = 'normal') {
+    const nameA = dataA.companyName || dataA.ticker;
+    const nameB = dataB.companyName || dataB.ticker;
+    const ctxA = buildStockContext(dataA);
+    const ctxB = buildStockContext(dataB);
+    const prompt = `사용자가 투자 비서 "예리"에게 두 종목(${nameA}, ${nameB})을 비교분석한 뒤 추가 질문을 했습니다.
+아래 두 종목의 최신 데이터를 참고하여 질문에 4~6줄로 예리하게 답하세요.
+"더 안전한 건?" 이나 "가성비는?" 같은 상대적 질문이라면 반드시 두 종목을 비교해서 짧게 논평하세요.
+
+[ ${nameA} 데이터 ]
+${ctxA}
+
+[ ${nameB} 데이터 ]
+${ctxB}
+
+사용자 질문: "${question}"`;
+    return callOpenAI(prompt, false, tone);
+}
+
 /** strategy_answer: 전략/판단/타이밍 의견 답변 */
 async function answerStrategy(question, stockData, tone = 'normal') {
     const name = stockData.companyName || stockData.ticker;
@@ -1342,4 +1362,4 @@ async function answerStockQuestion(question, stockData, tone = 'normal') {
     return answerFact(question, stockData, tone);
 }
 
-module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };
+module.exports = { analyzeStock, analyzeStockBuyTiming, analyzeStockSellTiming, analyzeStockRisk, analyzeStockEarnings, analyzeStockCasual, analyzeStockOverheat, analyzeStockValuation, analyzeStockComparison, analyzeETF, analyzePortfolio, analyzeRecommendation, analyzeMarket, analyzeSector, classifyQuery, fallbackChat, answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy, answerComparisonFollowup, computeScore, normalizeData, validateData, computeScore6, classifyNewsItems, buildVerifiedContext };

@@ -68,7 +68,9 @@ class SessionManager {
 
     isTickerContextValid(chatId) {
         const s = this.get(chatId);
-        if (!s || !s.lastAnalyzedTicker || !s.lastTickerTime) return false;
+        if (!s || !s.lastTickerTime) return false;
+        // 단일 종목이거나 비교 상태이면 유효
+        if (!s.lastAnalyzedTicker && !s.isComparison) return false;
         return (Date.now() - s.lastTickerTime) < TICKER_CONTEXT_TTL;
     }
 
