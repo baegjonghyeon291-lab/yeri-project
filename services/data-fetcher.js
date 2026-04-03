@@ -1015,56 +1015,106 @@ async function fetchDeepMetric(ticker, metricClass) {
 
     console.log(`[DeepMetric] 🔍 ${ticker}의 ${metricClass} 지표 심층 탐색 시작...`);
 
+    // 한국 티커 .KS 처리: US 전용 API에서는 순수 숫자만 사용
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    const usTicker = isKR ? ticker.replace(/\.(KS|KQ)$/, '') : ticker;
+
+    // 문자열 값 안전 파싱 헬퍼 ("10.8%" → 10.8, "5.79" → 5.79)
+    const safeParse = (v) => {
+        if (v == null) return null;
+        if (typeof v === 'number') return isNaN(v) ? null : v;
+        const n = parseFloat(String(v).replace('%', ''));
+        return isNaN(n) ? null : n;
+    };
+
     // metricClass 별 처리 로직
     const extractors = {
         'PER': {
-            fmp: (q, m) => q?.pe ?? m?.peRatioTTM ?? null,
-            finnhub: (m) => m?.peNormalizedAnnual ?? m?.peBasicExclExtraTTM ?? null,
-            eodhd: (hi, val) => hi?.PERatio ?? val?.TrailingPE ?? val?.ForwardPE ?? null,
-            yahoo: (f) => f?.peRatio ?? f?.pe ?? null,
+            fmp: (q, m) => safeParse(q?.pe) ?? safeParse(m?.peRatioTTM) ?? null,
+            finnhub: (m) => safeParse(m?.peNormalizedAnnual) ?? safeParse(m?.peBasicExclExtraTTM) ?? null,
+            eodhd: (hi, val) => safeParse(hi?.PERatio) ?? safeParse(val?.TrailingPE) ?? safeParse(val?.ForwardPE) ?? null,
+            yahoo: (f) => safeParse(f?.peRatio) ?? safeParse(f?.pe) ?? null,
+            rapidapi: (d) => safeParse(d?.trailingPE) ?? null,
+            fullData: (data) => safeParse(data?.fundamentals?.peRatio) ?? safeParse(data?.fundamentals?.pe) ?? null,
             format: v => `PER은 ${parseFloat(v).toFixed(2)}배입니다.`
         },
         'PBR': {
-            fmp: (q, m) => m?.pbRatioTTM ?? null,
-            finnhub: (m) => m?.pbAnnual ?? null,
-            eodhd: (hi, val) => val?.PriceBookMRQ ?? null,
-            yahoo: (f) => f?.pbRatio ?? f?.priceToBook ?? null,
+            fmp: (q, m) => safeParse(m?.pbRatioTTM) ?? null,
+            finnhub: (m) => safeParse(m?.pbAnnual) ?? null,
+            eodhd: (hi, val) => safeParse(val?.PriceBookMRQ) ?? null,
+            yahoo: (f) => safeParse(f?.pbRatio) ?? safeParse(f?.priceToBook) ?? null,
+            rapidapi: (d) => safeParse(d?.priceToBook) ?? null,
+            fullData: (data) => safeParse(data?.fundamentals?.pbRatio) ?? null,
             format: v => `PBR은 ${parseFloat(v).toFixed(2)}배입니다.`
         },
         'ROE': {
-            fmp: (q, m) => m?.roeTTM != null ? m.roeTTM * 100 : null,
-            finnhub: (m) => m?.roeAnnual ?? m?.roeTTM ?? null,
-            eodhd: (hi, val) => hi?.ReturnOnEquityTTM != null ? hi.ReturnOnEquityTTM * 100 : null,
-            yahoo: (f) => f?.roe != null ? f.roe * 100 : null,
+            fmp: (q, m) => { const v = safeParse(m?.roeTTM); return v != null ? v * 100 : null; },
+            finnhub: (m) => safeParse(m?.roeAnnual) ?? safeParse(m?.roeTTM) ?? null,
+            eodhd: (hi, val) => { const v = safeParse(hi?.ReturnOnEquityTTM); return v != null ? v * 100 : null; },
+            yahoo: (f) => {
+                // Yahoo returns ROE as "10.8%" string or raw float
+                const raw = f?.roe;
+                if (raw == null) return null;
+                const n = safeParse(raw);
+                if (n == null) return null;
+                // 이미 % 포맷이면 그대로, 아니면 *100
+                return n > 1 ? n : n * 100;
+            },
+            rapidapi: (d) => { const v = safeParse(d?.returnOnEquity); return v != null ? v * 100 : null; },
+            fullData: (data) => {
+                const raw = data?.fundamentals?.roe;
+                if (raw == null) return null;
+                const n = safeParse(raw);
+                if (n == null) return null;
+                return n > 1 ? n : n * 100;
+            },
             format: v => `ROE는 ${parseFloat(v).toFixed(1)}%입니다.`
         },
         'EPS': {
-            fmp: (q, m) => q?.eps ?? null,
-            finnhub: (m) => m?.epsNormalizedAnnual ?? null,
-            eodhd: (hi, val) => hi?.EPS ?? null,
-            yahoo: (f) => f?.eps ?? null,
-            format: v => `EPS(주당순이익)는 $${parseFloat(v).toFixed(2)}입니다.`
+            fmp: (q, m) => safeParse(q?.eps) ?? null,
+            finnhub: (m) => safeParse(m?.epsNormalizedAnnual) ?? null,
+            eodhd: (hi, val) => safeParse(hi?.EPS) ?? null,
+            yahoo: (f) => safeParse(f?.eps) ?? null,
+            rapidapi: (d) => safeParse(d?.epsTrailingTwelveMonths) ?? null,
+            fullData: (data) => safeParse(data?.fundamentals?.eps) ?? null,
+            format: v => {
+                const currency = isKR ? '₩' : '$';
+                return `EPS(주당순이익)는 ${currency}${parseFloat(v).toFixed(2)}입니다.`;
+            }
         },
         'DIVIDEND': {
-            fmp: (q, m) => m?.dividendYieldTTM != null ? m.dividendYieldTTM * 100 : (m?.dividendYieldPercentageTTM ?? null),
-            finnhub: (m) => m?.dividendYieldIndicatedAnnual ?? m?.dividendYield5Y ?? null,
-            eodhd: (hi, val) => hi?.DividendYield != null ? hi.DividendYield * 100 : null,
-            yahoo: (f) => f?.dividendYield != null ? f.dividendYield * 100 : null,
+            fmp: (q, m) => { const v = safeParse(m?.dividendYieldTTM); return v != null ? v * 100 : (safeParse(m?.dividendYieldPercentageTTM) ?? null); },
+            finnhub: (m) => safeParse(m?.dividendYieldIndicatedAnnual) ?? safeParse(m?.dividendYield5Y) ?? null,
+            eodhd: (hi, val) => { const v = safeParse(hi?.DividendYield); return v != null ? v * 100 : null; },
+            yahoo: (f) => { const v = safeParse(f?.dividendYield); return v != null ? v * 100 : null; },
+            rapidapi: (d) => safeParse(d?.dividendYield) ?? null,
+            fullData: (data) => {
+                const v = safeParse(data?.fundamentals?.dividendYield);
+                return v != null ? v * 100 : null;
+            },
             format: v => `배당수익률은 ${parseFloat(v).toFixed(2)}%입니다.`
         },
         'FCF': {
-            fmp: (q, m) => m?.freeCashFlowPerShareTTM ? (m.freeCashFlowPerShareTTM * (q?.sharesOutstanding || 1)) : null,
-            finnhub: (m) => null, // Finnhub FCF is complex
+            fmp: (q, m) => { const v = safeParse(m?.freeCashFlowPerShareTTM); return v ? (v * (q?.sharesOutstanding || 1)) : null; },
+            finnhub: (m) => null,
             eodhd: (hi, val) => null,
-            yahoo: (f) => f?.freeCashFlow ?? null,
-            format: v => `자유현금흐름(FCF)은 $${(parseFloat(v)/1e9).toFixed(2)}B (십억 달러)입니다.`
+            yahoo: (f) => safeParse(f?.freeCashFlow) ?? null,
+            rapidapi: (d) => null,
+            fullData: (data) => safeParse(data?.fundamentals?.freeCashFlow) ?? null,
+            format: v => {
+                const abs = Math.abs(parseFloat(v));
+                if (isKR) return `자유현금흐름(FCF)은 ₩${(abs/1e12).toFixed(2)}T입니다.`;
+                return `자유현금흐름(FCF)은 $${(abs/1e9).toFixed(2)}B입니다.`;
+            }
         },
         'DEBT': {
-            fmp: (q, m) => m?.debtToEquityTTM ?? null,
-            finnhub: (m) => m?.totalDebt_totalEquityAnnual ?? null,
+            fmp: (q, m) => safeParse(m?.debtToEquityTTM) ?? null,
+            finnhub: (m) => safeParse(m?.totalDebt_totalEquityAnnual) ?? null,
             eodhd: (hi, val) => null,
-            yahoo: (f) => f?.debtToEquity ?? null,
-            format: v => `부채비율(D/E)은 ${(parseFloat(v)).toFixed(2)}입니다.`
+            yahoo: (f) => safeParse(f?.debtToEquity) ?? null,
+            rapidapi: (d) => safeParse(d?.debtToEquity) ?? null,
+            fullData: (data) => safeParse(data?.fundamentals?.debtToEquity) ?? null,
+            format: v => `부채비율(D/E)은 ${parseFloat(v).toFixed(2)}입니다.`
         }
     };
 
@@ -1084,6 +1134,7 @@ async function fetchDeepMetric(ticker, metricClass) {
             fetch: async () => {
                 const key = process.env.FINNHUB_API_KEY;
                 if (!key) return null;
+                // Finnhub 한국 주식도 지원 (티커 그대로)
                 const res = await axios.get(`https://finnhub.io/api/v1/stock/metric?symbol=${ticker}&metric=all&token=${key}`, { timeout: 3000 }).catch(()=>null);
                 return res?.data?.metric ? ex.finnhub(res.data.metric) : null;
             }
@@ -1093,11 +1144,25 @@ async function fetchDeepMetric(ticker, metricClass) {
             fetch: async () => {
                 const key = process.env.FMP_API_KEY;
                 if (!key) return null;
+                const fmpTicker = isKR ? usTicker : ticker;
                 const [qRes, mRes] = await Promise.all([
-                    axios.get(`https://financialmodelingprep.com/api/v3/quote/${ticker}?apikey=${key}`, { timeout: 3000 }).catch(()=>null),
-                    axios.get(`https://financialmodelingprep.com/api/v3/key-metrics-ttm/${ticker}?apikey=${key}`, { timeout: 3000 }).catch(()=>null)
+                    axios.get(`https://financialmodelingprep.com/api/v3/quote/${fmpTicker}?apikey=${key}`, { timeout: 3000 }).catch(()=>null),
+                    axios.get(`https://financialmodelingprep.com/api/v3/key-metrics-ttm/${fmpTicker}?apikey=${key}`, { timeout: 3000 }).catch(()=>null)
                 ]);
                 return ex.fmp(qRes?.data?.[0], mRes?.data?.[0]);
+            }
+        },
+        {
+            name: 'RapidAPI',
+            fetch: async () => {
+                const key = process.env.RAPIDAPI_KEY;
+                if (!key) return null;
+                const res = await axios.get(`https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes?ticker=${ticker}`, {
+                    headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' },
+                    timeout: 3000
+                }).catch(() => null);
+                const d = res?.data?.body?.[0];
+                return d ? ex.rapidapi(d) : null;
             }
         },
         {
@@ -1105,7 +1170,9 @@ async function fetchDeepMetric(ticker, metricClass) {
             fetch: async () => {
                 const key = process.env.EODHD_API_KEY;
                 if (!key) return null;
-                const res = await axios.get(`https://eodhd.com/api/fundamentals/${ticker}.US?api_token=${key}&fmt=json`, { timeout: 3000 }).catch(()=>null);
+                const suffix = isKR ? '.KO' : '.US';
+                const eoTicker = isKR ? usTicker : ticker;
+                const res = await axios.get(`https://eodhd.com/api/fundamentals/${eoTicker}${suffix}?api_token=${key}&fmt=json`, { timeout: 3000 }).catch(()=>null);
                 return res?.data ? ex.eodhd(res.data.Highlights, res.data.Valuation) : null;
             }
         }
@@ -1113,26 +1180,47 @@ async function fetchDeepMetric(ticker, metricClass) {
 
     let foundValue = null;
     let foundSource = null;
+    const attemptLog = [];
 
     for (const src of sources) {
         try {
             const val = await src.fetch();
-            if (val != null && !isNaN(parseFloat(val))) {
-                foundValue = val;
+            const parsed = safeParse(val);
+            attemptLog.push({ name: src.name, result: parsed != null ? 'OK' : 'no data' });
+            if (parsed != null) {
+                foundValue = parsed;
                 foundSource = src.name;
+                console.log(`[DeepMetric] ✅ ${ticker} ${metricClass} = ${parsed} (출처: ${src.name})`);
                 break;
             }
-        } catch(e) {}
+        } catch(e) {
+            attemptLog.push({ name: src.name, result: e.message?.slice(0, 40) });
+        }
+    }
+
+    // 탐색 로그 출력
+    console.log(`[DeepMetric] 탐색 결과: ${attemptLog.map(a => `${a.name}(${a.result})`).join(' → ')}`);
+
+    // 풀 데이터 fallback: 단일 지표 탐색이 다 실패하면, 전체 fetchAllStockData의 cached 데이터에서 추출 시도
+    if (foundValue == null && ex.fullData) {
+        const cachedKey = `ALL_${ticker}`;
+        const cached = orchestrationCache.get(cachedKey);
+        if (cached) {
+            const fullVal = ex.fullData(cached.data);
+            if (fullVal != null) {
+                foundValue = fullVal;
+                foundSource = 'Cached/' + (cached.data?.fundamentals?.source || 'Unknown');
+                console.log(`[DeepMetric] 🛡️ 캐시 fallback: ${ticker} ${metricClass} = ${fullVal} (출처: ${foundSource})`);
+            }
+        }
     }
 
     if (foundValue != null) {
-        // 배당 0점대 무배당 처리
         if (metricClass === 'DIVIDEND' && parseFloat(foundValue) === 0) {
             console.log(`[DeepMetric] 🔍 ${ticker} 배당 0 확인 -> NO_DIVIDEND`);
             return { status: 'NO_DIVIDEND', formattedText: '현재 배당을 지급하지 않습니다 (무배당).' };
         }
         
-        console.log(`[DeepMetric] ✅ ${ticker} ${metricClass} 찾음: ${foundValue} (출처: ${foundSource})`);
         return {
             status: 'SUCCESS',
             value: foundValue,
@@ -1141,10 +1229,8 @@ async function fetchDeepMetric(ticker, metricClass) {
         };
     }
 
-    // 만약 4개 API (Yahoo, Finnhub, FMP, EODHD)를 다 돌았는데도 배당을 못 찾았으면
-    // 기본적으로 배당을 지급하지 않는 기업일 확률이 매우 높음 (99%)
     if (metricClass === 'DIVIDEND') {
-        console.log(`[DeepMetric] ❌ ${ticker} 배당 정보 4개 소스 모두 없음 -> NO_DIVIDEND 간주`);
+        console.log(`[DeepMetric] ❌ ${ticker} 배당 정보 5개 소스 모두 없음 -> NO_DIVIDEND 간주`);
         return { status: 'NO_DIVIDEND', formattedText: '현재 배당을 지급하지 않습니다 (무배당).' };
     }
 

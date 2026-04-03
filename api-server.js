@@ -247,6 +247,8 @@ app.post('/api/chat', async (req, res) => {
                 console.log(`[QueryAudit] query: "${text}"`);
                 console.log(`[QueryAudit] intent: ${outputMode} (follow-up)`);
                 console.log(`[QueryAudit] symbol: ${lastTicker} (${lastName}) — 세션 상속`);
+                const succeededProviders = Object.entries(fAudit.succeeded || {}).filter(([,v]) => v !== 'NONE').map(([cat, src]) => `${cat}:${src}`);
+                console.log(`[QueryAudit] providers_succeeded: [${succeededProviders.join(', ')}]`);
                 console.log(`[QueryAudit] final_source_map: ${JSON.stringify(fAudit.sourceMap)}`);
                 const failedProviders = Object.entries(fAudit.failed || {}).filter(([,v]) => v.length > 0);
                 if (failedProviders.length) {
@@ -403,6 +405,8 @@ app.post('/api/chat', async (req, res) => {
                 console.log(`[QueryAudit] query: "${text}"`);
                 console.log(`[QueryAudit] intent: ${outputMode} | stockIntent: ${stockIntent}`);
                 console.log(`[QueryAudit] symbol: ${ticker} (${name})`);
+                const succeededProviders = Object.entries(qAudit.succeeded || {}).filter(([,v]) => v !== 'NONE').map(([cat, src]) => `${cat}:${src}`);
+                console.log(`[QueryAudit] providers_succeeded: [${succeededProviders.join(', ')}]`);
                 console.log(`[QueryAudit] final_source_map: ${JSON.stringify(qAudit.sourceMap)}`);
                 const failedProviders = Object.entries(qAudit.failed || {}).filter(([,v]) => v.length > 0);
                 if (failedProviders.length) {
