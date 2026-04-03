@@ -804,6 +804,18 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         `[검증로그] 52w high/low:     ${price?.fifty2High ?? 'N/A'} / ${price?.fifty2Low ?? 'N/A'}`,
         `[검증로그] 💡 Confidence:    ${metadata.confidence} (${metadata.tier})`,
         `${'─'.repeat(50)}`,
+        `[ProviderAudit] ═══ 소스 맵 ═══`,
+        `[ProviderAudit] price         → ${price?.source || 'FAILED'}`,
+        `[ProviderAudit] history       → ${history?.source || 'FAILED'}`,
+        `[ProviderAudit] technical     → ${technical?.source || 'FAILED'}`,
+        `[ProviderAudit] fundamentals  → ${fundamentals?.source || 'FAILED'}`,
+        `[ProviderAudit] news          → ${news?.length ? (news[0]?.source || 'Finnhub/NewsAPI') : 'NONE'}`,
+        `[ProviderAudit] macro         → ${macro?.source || 'FAILED'}`,
+        `[ProviderAudit] analyst       → ${analystRatings?.source || 'N/A'}`,
+        `[ProviderAudit] bbands        → ${bbands?.source || 'N/A'}`,
+        `[ProviderAudit] sec           → ${secFilings?.length ? 'SEC.gov' : 'N/A'}`,
+        `[ProviderAudit] dart          → ${disclosures?.length ? 'DART' : 'N/A'}`,
+        `${'─'.repeat(50)}`,
         `[DataFetcher] ✅ Pipeline complete for: ${ticker}`,
     ];
     console.log(vLog.join('\n'));

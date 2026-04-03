@@ -200,6 +200,48 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
+        // ★★ 후속 질문 문맥 추적 (Follow-up Context Inheritance) ★★
+        // 세션에 lastAnalyzedTicker가 있고, 현재 입력에 종목명이 없고, 후속 질문 패턴이면 직전 종목 자동 상속
+        const FOLLOWUP_KEYWORDS = ['그럼', '그러면', '언제', '얼마나', '지금', '더', '회복', '돌파',
+            '오를까', '내릴까', '위험해', '사도', '팔까', '해도', '매수', '매도', '추가매수',
+            '얼마', '목표', '가능', '어때', '괜찮', '좋아', '좋을', '나아', '나을',
+            '살만', '들어가', '어떨까', '왜', '빠졌', '올랐', '떨어', '급등', '급락',
+            'ROE', 'PER', 'EPS', 'PBR', 'RSI'];
+        const currentStockInText = resolveStock(text);
+        const hasFollowupPattern = FOLLOWUP_KEYWORDS.some(k => text.includes(k));
+        const isFollowup = !currentStockInText && hasFollowupPattern && sessions.isTickerContextValid(chatId);
+
+        if (isFollowup) {
+            const lastTicker = session.lastAnalyzedTicker;
+            const lastName = session.lastAnalyzedName;
+            const lastMarket = session.lastAnalyzedMarket;
+            const lastCorpCode = session.lastAnalyzedCorpCode || null;
+            console.log(`[API /chat] ★ 후속 질문 감지! "${text}" → 직전 종목 상속: ${lastTicker} (${lastName})`);
+
+            const data = await fetchAllStockData(lastTicker, lastName, lastCorpCode);
+            data.investmentContext = session.context;
+
+            const outputMode = intent.output_mode || 'strategy_answer';
+            console.log(`[API /chat] ▶ follow-up output_mode: ${outputMode} | ticker: ${lastTicker}`);
+
+            // 후속 질문은 strategy/reason/fact 중 하나로 라우팅
+            if (outputMode === 'fact_answer') {
+                const reply = await answerFact(text, data, 'normal');
+                messages.push({ type: 'text', content: reply });
+            } else if (outputMode === 'reason_answer') {
+                const reply = await answerReason(text, data, 'normal');
+                messages.push({ type: 'text', content: reply });
+            } else {
+                // strategy_answer / analysis_report / chat_answer 등 나머지는 전부 strategy로
+                const reply = await answerStrategy(text, data, 'normal');
+                messages.push({ type: 'text', content: reply });
+            }
+
+            // 세션 갱신 (종목 유지 + 타임스탬프 갱신)
+            sessions.update(chatId, { lastTickerTime: Date.now() });
+            return res.json({ messages });
+        }
+
         // 1. 종목 비교 분석
         const COMPARISON_KEYWORDS = ['vs', 'VS', 'versus', '비교', '차이', '이랑', '랑', '대비', '어느게나아', '뭐가나아', '뭐가좋아', '둘중'];
         const hasComparisonKeyword = COMPARISON_KEYWORDS.some(k => text.replace(/\s/g, '').includes(k));
@@ -335,7 +377,7 @@ app.post('/api/chat', async (req, res) => {
                     report = await (useDeep ? analyzeStock(data, useDeep, 'normal') : analyzeStockCasual(data, useDeep, 'normal'));
             }
 
-            sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastTickerTime: Date.now() });
+            sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastAnalyzedCorpCode: corpCode, lastTickerTime: Date.now() });
 
             // UI 렌더링용 구조화 데이터
             const score = computeScore(data);
