@@ -931,7 +931,24 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         }
     }
 
-    const finalData = { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist, metadata, _providerAudit: auditData };
+    const finalData = { 
+        ticker, 
+        companyName: companyName || ticker, 
+        price, 
+        history, 
+        technical, 
+        bbands, 
+        fundamentals, 
+        news, 
+        macro, 
+        analystRatings, 
+        secFilings, 
+        disclosures, 
+        supportResist, 
+        metadata, 
+        _providerAudit: auditData,
+        fetchedAt: Date.now()
+    };
     orchestrationCache.set(cacheKey, { ts: Date.now(), data: finalData });
     return finalData;
 }

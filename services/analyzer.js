@@ -1170,6 +1170,18 @@ function buildStockContext(stockData) {
     const p = stockData.price || {};
     const newsText = (stockData.news || []).slice(0, 5).map(n => `- ${n.title} (${n.source})`).join('\n');
 
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    const delayInfo = isKR ? '20분 지연' : 'Cboe BATS 실시간 / 기타 15분 지연';
+    const fetchTimeObj = new Date(stockData.fetchedAt || Date.now());
+    
+    // 한국 시간(KST) 문자열 생성 (포맷: YYYY-MM-DD HH:mm:ss)
+    const kstString = new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+    }).format(fetchTimeObj);
+
     return [
         `[종목] ${name} (${ticker})`,
         `현재가: ${price} ${changePct}`,
@@ -1188,6 +1200,10 @@ function buildStockContext(stockData) {
         formatSafe(t.rsi, 1, 'RSI(14): ') || '',
         formatSafe(t.ema20, 2, 'EMA20: $') || '',
         newsText ? `\n[최신 뉴스]\n${newsText}` : '',
+        `\n[❗타이밍 및 시세 안내 - 반드시 응답에 포함할 것]`,
+        `- 시세 기준: ${delayInfo}`,
+        `- 조회 시점: ${kstString}`,
+        `*(답변 시 가격 뒤에 괄호로 시세 지연 정보를 명시하고, 문장 끝에 조회 시간을 한 줄로 추가하세요.)*`
     ].filter(Boolean).join('\n');
 }
 
