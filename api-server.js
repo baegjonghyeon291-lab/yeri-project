@@ -296,8 +296,21 @@ app.post('/api/chat', async (req, res) => {
 
         // 2. 단일 종목 (Ticker Engine: normalize -> exact -> alias -> fuzzy)
         const extracted = extractCompanyName(text) || text.trim();
-        const suggestion = suggestCandidates(extracted);
+        let suggestion = suggestCandidates(extracted);
         const isStockIntent = hasStockKeyword(text) || (text.length <= 15 && !text.includes('안녕') && !text.includes('고마워'));
+
+        // ★★ LLM 티커 Fallback (비주류 종목 등 로컬 DB에 없을 때) ★★
+        if (suggestion.tier !== 'HIGH' && intent.type === 'stock' && intent.ticker && intent.ticker !== 'UNKNOWN') {
+            console.log(`[API /chat] 💡 로컬 DB 실패. LLM intent.ticker(${intent.ticker}) fallback 사용`);
+            suggestion = {
+                tier: 'HIGH',
+                resolved: {
+                    ticker: intent.ticker,
+                    name: intent.resolved_name || intent.ticker,
+                    market: intent.ticker.endsWith('.KS') || intent.ticker.endsWith('.KQ') ? 'KR' : 'US'
+                }
+            };
+        }
 
         // HIGH: 올바른 점수(0.85 이상) 이거나 정확히 일치 -> 바로 분석 수행
         if (suggestion.tier === 'HIGH' && suggestion.resolved) {
