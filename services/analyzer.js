@@ -1162,15 +1162,16 @@ function formatSafe(value, decimals = 2, prefix = '', suffix = '') {
 function buildStockContext(stockData) {
     const ticker = stockData.ticker || '';
     const name = stockData.companyName || ticker;
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    const currency = isKR ? '₩' : '$';
     const priceVal = stockData.price?.current;
-    const price = priceVal != null ? `$${Number(priceVal).toLocaleString()}` : '데이터 없음';
+    const price = priceVal != null ? `${currency}${Number(priceVal).toLocaleString()}` : '데이터 없음';
     const changePct = formatSafe(stockData.price?.changePct, 2, stockData.price?.changePct > 0 ? '+' : '', '%') || '';
     const f = stockData.fundamentals || {};
     const t = stockData.technical || {};
     const p = stockData.price || {};
     const newsText = (stockData.news || []).slice(0, 5).map(n => `- ${n.title} (${n.source})`).join('\n');
 
-    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
     const delayInfo = isKR ? '20분 지연' : 'Cboe BATS 실시간 / 기타 15분 지연';
     const fetchTimeObj = new Date(stockData.fetchedAt || Date.now());
     
