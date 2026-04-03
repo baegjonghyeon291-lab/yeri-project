@@ -1113,7 +1113,7 @@ intent 분류:
             else parsed.output_mode = 'fact_answer';
         }
         // 코드 레벨 강제 교정 — GPT가 잘못 분류해도 방어
-        const STRATEGY_KEYWORDS = ['괜찮아', '어때', '어떄', '살만해', '살만한가', '위험해', '위험한가', '지금 어때', '들어가도 돼', '들어가도 될까', '살까', '해도 돼', '해도 될까', '사도 돼', '사도 될까', '팔까', '매수해', '매도해', '괜찮을까', '어떨까', '좋아?', '좋을까', '나을까', '나아?'];
+        const STRATEGY_KEYWORDS = ['괜찮아', '어때', '어떄', '살만해', '살만한가', '위험해', '위험한가', '지금 어때', '들어가도 돼', '들어가도 될까', '살까', '해도 돼', '해도 될까', '사도 돼', '사도 될까', '팔까', '매수해', '매도해', '괜찮을까', '어떨까', '좋아?', '좋을까', '나을까', '나아?', '비싸', '더 가', '어딸까', '할까'];
         const lowerMsg = message.toLowerCase();
         const hasStrategyKeyword = STRATEGY_KEYWORDS.some(k => lowerMsg.includes(k));
 
@@ -1182,6 +1182,10 @@ function buildStockContext(stockData) {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
         hour12: false
     }).format(fetchTimeObj);
+    
+    const dataQuality = stockData._dataWarning 
+        ? stockData._dataWarning 
+        : `✅ 신뢰도 높음 (가격, 주요 재무, 기술적 지표 모두 확보됨)`;
 
     return [
         `[종목] ${name} (${ticker})`,
@@ -1204,7 +1208,8 @@ function buildStockContext(stockData) {
         `\n[❗타이밍 및 시세 안내 - 반드시 응답에 포함할 것]`,
         `- 시세 기준: ${delayInfo}`,
         `- 조회 시점: ${kstString}`,
-        `*(답변 시 가격 뒤에 괄호로 시세 지연 정보를 명시하고, 문장 끝에 조회 시간을 한 줄로 추가하세요.)*`
+        `- 데이터 신뢰도: ${dataQuality}`,
+        `*(답변 시 가격 뒤에 괄호로 시세 지연 정보를 명시하고, 문장 끝에 조회 시간과 신뢰도를 짧게 한 줄로 추가하세요.)*`
     ].filter(Boolean).join('\n');
 }
 

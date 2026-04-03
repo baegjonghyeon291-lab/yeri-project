@@ -206,7 +206,7 @@ app.post('/api/chat', async (req, res) => {
             '오를까', '내릴까', '위험해', '사도', '팔까', '해도', '매수', '매도', '추가매수',
             '얼마', '목표', '가능', '어때', '괜찮', '좋아', '좋을', '나아', '나을',
             '살만', '들어가', '어떨까', '왜', '빠졌', '올랐', '떨어', '급등', '급락',
-            '줘', '알려', '가르쳐', '수익률', '배당', '시총', '부채', '현금흐름', '자산', 
+            '줘', '알려', '가르쳐', '수익률', '배당', '시총', '부채', '현금흐름', '자산', '비싸',
             'ROE', 'PER', 'EPS', 'PBR', 'RSI', 'FCF', 'MACD', 'EMA'];
         const currentStockInText = resolveStock(text);
         const hasFollowupPattern = FOLLOWUP_KEYWORDS.some(k => text.includes(k));
@@ -353,6 +353,9 @@ app.post('/api/chat', async (req, res) => {
                 messages.push({ type: 'text', content: reply });
                 return res.json({ messages });
             }
+            
+            // 세션 갱신 로직: outputMode에 따른 early return 전에 세션을 갱신해야 이력이 남음
+            sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastAnalyzedCorpCode: corpCode, lastTickerTime: Date.now() });
 
             // 3) fact_answer — 수치/사실 간결 답변
             if (outputMode === 'fact_answer') {
@@ -409,8 +412,6 @@ app.post('/api/chat', async (req, res) => {
                 default:
                     report = await (useDeep ? analyzeStock(data, useDeep, 'normal') : analyzeStockCasual(data, useDeep, 'normal'));
             }
-
-            sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastAnalyzedCorpCode: corpCode, lastTickerTime: Date.now() });
 
             // ── Per-query Audit Log ──
             const qAudit = data._providerAudit;
