@@ -206,7 +206,8 @@ app.post('/api/chat', async (req, res) => {
             '오를까', '내릴까', '위험해', '사도', '팔까', '해도', '매수', '매도', '추가매수',
             '얼마', '목표', '가능', '어때', '괜찮', '좋아', '좋을', '나아', '나을',
             '살만', '들어가', '어떨까', '왜', '빠졌', '올랐', '떨어', '급등', '급락',
-            'ROE', 'PER', 'EPS', 'PBR', 'RSI'];
+            '줘', '알려', '가르쳐', '수익률', '배당', '시총', '부채', '현금흐름', '자산', 
+            'ROE', 'PER', 'EPS', 'PBR', 'RSI', 'FCF', 'MACD', 'EMA'];
         const currentStockInText = resolveStock(text);
         const hasFollowupPattern = FOLLOWUP_KEYWORDS.some(k => text.includes(k));
         const isFollowup = !currentStockInText && hasFollowupPattern && sessions.isTickerContextValid(chatId);
