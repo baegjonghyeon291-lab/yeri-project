@@ -1085,6 +1085,9 @@ type 분류:
 - 종목+수량 -> type:"portfolio"
 - 일반 대화 -> type:"general"
 
+*** 티커 추출 주의사항 (매우 중요):
+"IREN ROE", "LUNR 실적" 처럼 알 수 없는 영문자/단어가 포함되어 있다면, 그것이 비주류 종목의 티커(ticker)일 확률이 거의 100%입니다. 반드시 ticker 필드에 추출하세요! (예: "IREN ROE" -> ticker: "IREN")
+
 intent 분류:
 - "분석해줘" -> intent:"full_analysis"
 - "언제 사" -> intent:"buy_timing"
