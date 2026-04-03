@@ -1,12 +1,12 @@
 /**
  * data-fetcher.js — Full multi-source pipeline with tiered fallback chains
  *
- * Price:         TwelveData → Polygon → Tiingo → Yahoo(yf2)
+ * Price:         TwelveData → Polygon → RapidAPI(Yahoo) → Tiingo → Yahoo(yf2)
  * Technicals:    TwelveData → AlphaVantage → Yahoo(yf2 로컸계산)
- * Fundamentals:  Yahoo(yf2) → Finnhub → EODHD
+ * Fundamentals:  FMP → Finnhub → NasdaqDataLink → EODHD
  * News:          NewsAPI → Finnhub → Yahoo(yf2)
- * Analyst:       Finnhub → Yahoo(yf2)
- * Macro:         FRED
+ * Analyst:       FMP → Finnhub
+ * Macro:         FRED → NasdaqDataLink
  * SEC Filings:   data.sec.gov (free, no key)
  * KR 재무:       DART + Yahoo(yf2 .KS)
  */
@@ -95,18 +95,41 @@ async function safeGet(label, fn) {
 }
 
 // ─────────────────────────────────────────────
-// Fallback runner — sources 순서대로 시도
+// Fallback runner — sources 순서대로 시도 + 감사 기록
 // ─────────────────────────────────────────────
+// 질문 1개당 provider 감사 로그 수집기
+let _currentAudit = null;
+
+function getAuditCollector() {
+    if (!_currentAudit) _currentAudit = { attempted: {}, failed: {}, succeeded: {}, sourceMap: {} };
+    return _currentAudit;
+}
+function resetAuditCollector() { _currentAudit = null; }
+function getAuditSnapshot() { return _currentAudit ? { ..._currentAudit } : null; }
+
 async function withFallback(label, sources) {
+    const audit = getAuditCollector();
+    audit.attempted[label] = sources.map(s => s[0]);
+    audit.failed[label] = [];
+    
     for (let i = 0; i < sources.length; i++) {
         const [name, fn] = sources[i];
         const result = await safeGet(name, fn);
         if (result !== null && result !== undefined) {
              if (i > 0) console.log(`[${name}] fallback used for ${label}`);
+             audit.succeeded[label] = name;
+             audit.sourceMap[label] = name;
              return result;
         }
+        // 실패 기록
+        const stat = apiStats.get(name);
+        const reason = stat ? (stat.fail > stat.success ? 'no data / error' : 'empty response') : 'unknown';
+        audit.failed[label] = audit.failed[label] || [];
+        audit.failed[label].push({ provider: name, reason });
     }
     console.warn(`[${label}] All sources failed`);
+    audit.succeeded[label] = 'NONE';
+    audit.sourceMap[label] = 'FAILED';
     return null;
 }
 
@@ -156,7 +179,31 @@ async function getPriceData(ticker) {
                 volume: r.v, source: 'Polygon'
             };
         }],
-        // 3순위: Yahoo Finance (yf2) — 한국 포함 보편적
+        // 3순위: RapidAPI Yahoo Finance — 추가 보강
+        ['RapidAPI/Yahoo', async () => {
+            const key = process.env.RAPIDAPI_KEY;
+            if (!key) return null;
+            const res = await axios.get(`https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes?ticker=${ticker}`, {
+                headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' },
+                timeout: 3000
+            }).catch(() => null);
+            const d = res?.data?.body?.[0];
+            if (!d || !d.regularMarketPrice) return null;
+            return {
+                current: d.regularMarketPrice,
+                open: d.regularMarketOpen,
+                high: d.regularMarketDayHigh,
+                low: d.regularMarketDayLow,
+                prevClose: d.regularMarketPreviousClose,
+                change: d.regularMarketChange,
+                changePct: d.regularMarketChangePercent,
+                volume: d.regularMarketVolume,
+                fifty2High: d.fiftyTwoWeekHigh,
+                fifty2Low: d.fiftyTwoWeekLow,
+                source: 'RapidAPI/Yahoo'
+            };
+        }],
+        // 4순위: Yahoo Finance (yf2) — 한국 포함 보편적
         ['Yahoo/yahoo-finance2', () => yahoo.getYahooPrice(ticker)]
     ]);
 
@@ -424,7 +471,31 @@ async function getFundamentals(ticker) {
             };
         }],
 
-        // 3순위: EODHD
+        // 3순위: NasdaqDataLink (Quandl) — 재무 보강
+        ['NasdaqDataLink', async () => {
+            const key = process.env.NASDAQ_API_KEY;
+            if (!key) return null;
+            const res = await axios.get(`https://data.nasdaq.com/api/v3/datasets/WIKI/${ticker}.json?rows=1&api_key=${key}`, { timeout: 8000 }).catch(() => null);
+            const dataset = res?.data?.dataset;
+            if (!dataset?.data?.[0]) return null;
+            const columns = dataset.column_names;
+            const row = dataset.data[0];
+            const colIdx = (name) => { const i = columns.indexOf(name); return i >= 0 ? row[i] : null; };
+            return {
+                companyName: dataset.name?.split(' Prices')[0] || ticker,
+                sector: null, industry: null,
+                mktCap: null, beta: null,
+                peRatio: null, eps: null, forwardPE: null, pbRatio: null,
+                debtToEquity: null, netMargin: null, roe: null,
+                revenueGrowthYoY: null, revenue: null, grossProfit: null,
+                nextEarningsDate: null,
+                // NasdaqDataLink은 OHLCV 데이터 위주 — 보조 교차검증 용도
+                _ndlClose: colIdx('Close'), _ndlVolume: colIdx('Volume'),
+                source: 'NasdaqDataLink'
+            };
+        }],
+
+        // 4순위: EODHD
         ['EODHD', async () => {
             const key = process.env.EODHD_API_KEY;
             if (!key) return null;
@@ -727,6 +798,7 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
     }
 
     console.log(`\n[DataFetcher] Starting full pipeline for: ${ticker}`);
+    resetAuditCollector(); // 새 파이프라인 시작 = 감사 로그 초기화
 
     let [price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures] = await Promise.all([
         getPriceData(ticker),
@@ -804,20 +876,31 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         `[검증로그] 52w high/low:     ${price?.fifty2High ?? 'N/A'} / ${price?.fifty2Low ?? 'N/A'}`,
         `[검증로그] 💡 Confidence:    ${metadata.confidence} (${metadata.tier})`,
         `${'─'.repeat(50)}`,
-        `[ProviderAudit] ═══ 소스 맵 ═══`,
-        `[ProviderAudit] price         → ${price?.source || 'FAILED'}`,
-        `[ProviderAudit] history       → ${history?.source || 'FAILED'}`,
-        `[ProviderAudit] technical     → ${technical?.source || 'FAILED'}`,
-        `[ProviderAudit] fundamentals  → ${fundamentals?.source || 'FAILED'}`,
-        `[ProviderAudit] news          → ${news?.length ? (news[0]?.source || 'Finnhub/NewsAPI') : 'NONE'}`,
-        `[ProviderAudit] macro         → ${macro?.source || 'FAILED'}`,
-        `[ProviderAudit] analyst       → ${analystRatings?.source || 'N/A'}`,
-        `[ProviderAudit] bbands        → ${bbands?.source || 'N/A'}`,
-        `[ProviderAudit] sec           → ${secFilings?.length ? 'SEC.gov' : 'N/A'}`,
-        `[ProviderAudit] dart          → ${disclosures?.length ? 'DART' : 'N/A'}`,
-        `${'─'.repeat(50)}`,
-        `[DataFetcher] ✅ Pipeline complete for: ${ticker}`,
     ];
+    // ── 상세 Provider Audit 로그 (per-query) ──
+    const auditData = getAuditSnapshot();
+    if (auditData) {
+        vLog.push(`[ProviderAudit] ═══ 상세 감사 로그 ═══`);
+        vLog.push(`[ProviderAudit] symbol: ${ticker}`);
+        for (const [category, providers] of Object.entries(auditData.attempted)) {
+            const succeeded = auditData.succeeded[category] || 'NONE';
+            const failed = (auditData.failed[category] || []).map(f => `${f.provider}(${f.reason})`).join(', ');
+            vLog.push(`[ProviderAudit] ${category.padEnd(16)} → attempted: [${providers.join(', ')}]`);
+            vLog.push(`[ProviderAudit] ${' '.repeat(16)}   succeeded: ${succeeded}`);
+            if (failed) vLog.push(`[ProviderAudit] ${' '.repeat(16)}   failed: ${failed}`);
+        }
+        vLog.push(`[ProviderAudit] ─── final_source_map ───`);
+        for (const [cat, src] of Object.entries(auditData.sourceMap)) {
+            vLog.push(`[ProviderAudit]   ${cat} → ${src}`);
+        }
+        // 추가: Yahoo retry 등 withFallback 밖 호출도 기록
+        vLog.push(`[ProviderAudit]   news → ${news?.length ? (news[0]?.source || 'Finnhub/NewsAPI') : 'NONE'}`);
+        vLog.push(`[ProviderAudit]   bbands → ${bbands?.source || 'N/A'}`);
+        vLog.push(`[ProviderAudit]   sec → ${secFilings?.length ? 'SEC.gov' : 'N/A'}`);
+        vLog.push(`[ProviderAudit]   dart → ${disclosures?.length ? 'DART' : 'N/A'}`);
+        vLog.push(`${'─'.repeat(50)}`);
+    }
+    vLog.push(`[DataFetcher] ✅ Pipeline complete for: ${ticker}`);
     console.log(vLog.join('\n'));
 
     // ── 이상치 검증: price/changePct null 또는 ±50% 초과 시 재조회 ──
@@ -848,7 +931,7 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         }
     }
 
-    const finalData = { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist, metadata };
+    const finalData = { ticker, companyName: companyName || ticker, price, history, technical, bbands, fundamentals, news, macro, analystRatings, secFilings, disclosures, supportResist, metadata, _providerAudit: auditData };
     orchestrationCache.set(cacheKey, { ts: Date.now(), data: finalData });
     return finalData;
 }
@@ -1069,4 +1152,4 @@ async function fetchDeepMetric(ticker, metricClass) {
     return { status: 'NO_DATA' };
 }
 
-module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData, getApiStats, computeDataReliability, fetchDeepMetric };
+module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData, getApiStats, computeDataReliability, fetchDeepMetric, getAuditSnapshot, resetAuditCollector };

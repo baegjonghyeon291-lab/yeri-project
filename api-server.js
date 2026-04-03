@@ -47,7 +47,7 @@ const {
     answerStockQuestion, answerFact, answerReason, answerConcept, answerStrategy,
     computeScore, normalizeData, validateData, computeScore6, classifyNewsItems
 } = require('./services/analyzer');
-const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability } = require('./services/data-fetcher');
+const { fetchAllStockData, fetchMarketData, fetchSectorData, computeDataReliability, getAuditSnapshot } = require('./services/data-fetcher');
 const {
     resolveStock, resolveSector, isDeepAnalysisRequest,
     hasStockKeyword, hasEarningsKeyword, isETF, isLeveragedETF,
@@ -239,6 +239,23 @@ app.post('/api/chat', async (req, res) => {
 
             // 세션 갱신 (종목 유지 + 타임스탬프 갱신)
             sessions.update(chatId, { lastTickerTime: Date.now() });
+
+            // ── Per-query Audit Log ──
+            const fAudit = data._providerAudit;
+            if (fAudit) {
+                console.log(`\n[QueryAudit] ═══ 질문별 감사 로그 ═══`);
+                console.log(`[QueryAudit] query: "${text}"`);
+                console.log(`[QueryAudit] intent: ${outputMode} (follow-up)`);
+                console.log(`[QueryAudit] symbol: ${lastTicker} (${lastName}) — 세션 상속`);
+                console.log(`[QueryAudit] final_source_map: ${JSON.stringify(fAudit.sourceMap)}`);
+                const failedProviders = Object.entries(fAudit.failed || {}).filter(([,v]) => v.length > 0);
+                if (failedProviders.length) {
+                    console.log(`[QueryAudit] providers_failed:`);
+                    failedProviders.forEach(([cat, fails]) => fails.forEach(f => console.log(`[QueryAudit]   ${cat}: ${f.provider} (${f.reason})`)));
+                }
+                console.log(`[QueryAudit] ═══════════════════════`);
+            }
+
             return res.json({ messages });
         }
 
@@ -378,6 +395,22 @@ app.post('/api/chat', async (req, res) => {
             }
 
             sessions.update(chatId, { lastAnalyzedTicker: ticker, lastAnalyzedName: name, lastAnalyzedMarket: market, lastAnalyzedCorpCode: corpCode, lastTickerTime: Date.now() });
+
+            // ── Per-query Audit Log ──
+            const qAudit = data._providerAudit;
+            if (qAudit) {
+                console.log(`\n[QueryAudit] ═══ 질문별 감사 로그 ═══`);
+                console.log(`[QueryAudit] query: "${text}"`);
+                console.log(`[QueryAudit] intent: ${outputMode} | stockIntent: ${stockIntent}`);
+                console.log(`[QueryAudit] symbol: ${ticker} (${name})`);
+                console.log(`[QueryAudit] final_source_map: ${JSON.stringify(qAudit.sourceMap)}`);
+                const failedProviders = Object.entries(qAudit.failed || {}).filter(([,v]) => v.length > 0);
+                if (failedProviders.length) {
+                    console.log(`[QueryAudit] providers_failed:`);
+                    failedProviders.forEach(([cat, fails]) => fails.forEach(f => console.log(`[QueryAudit]   ${cat}: ${f.provider} (${f.reason})`)));
+                }
+                console.log(`[QueryAudit] ═══════════════════════`);
+            }
 
             // UI 렌더링용 구조화 데이터
             const score = computeScore(data);
