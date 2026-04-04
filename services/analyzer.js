@@ -1112,6 +1112,22 @@ intent 분류:
             else if (parsed.intent === 'fallback') parsed.output_mode = 'chat_answer';
             else parsed.output_mode = 'fact_answer';
         }
+
+        // ★★ 결정론적 티커 오버라이드 — GPT가 잘못 매칭해도 방어 ★★
+        // 메시지에 명시적 대문자 티커(2~5자)가 있으면 resolveStock으로 확인 후 강제 적용
+        const { resolveStock } = require('../utils/ticker-util');
+        const tickerMatch = message.match(/\b([A-Z]{2,5})\b/);
+        if (tickerMatch) {
+            const explicitTicker = tickerMatch[1];
+            const resolved = resolveStock(explicitTicker);
+            if (resolved && resolved.ticker !== parsed.ticker) {
+                console.log(`[classifyQuery] ★ 티커 오버라이드: GPT="${parsed.ticker}" → 실제="${resolved.ticker}" (메시지에 "${explicitTicker}" 명시)`);
+                parsed.ticker = resolved.ticker;
+                parsed.name = resolved.name;
+                parsed.market = resolved.market || 'US';
+                if (parsed.type === 'general') parsed.type = 'stock';
+            }
+        }
         // 코드 레벨 강제 교정 — GPT가 잘못 분류해도 방어
         const STRATEGY_KEYWORDS = ['괜찮아', '어때', '어떄', '살만해', '살만한가', '위험해', '위험한가', '지금 어때', '들어가도 돼', '들어가도 될까', '살까', '해도 돼', '해도 될까', '사도 돼', '사도 될까', '팔까', '매수해', '매도해', '괜찮을까', '어떨까', '좋아?', '좋을까', '나을까', '나아?', '비싸', '더 가', '어딸까', '할까'];
         const lowerMsg = message.toLowerCase();
