@@ -1047,6 +1047,25 @@ export default function App() {
   const [page, setPage] = useState('watchlist') // 'watchlist' | 'chat' | 'portfolio'
   const [chatId, setChatId] = useState(() => localStorage.getItem('yeri_chatId') || '')
   const [alertCount, setAlertCount] = useState(0)
+  
+  // 앱 (원격) 업데이트 감지 상태
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+
+  // 배포 버전 주기적 확인 (15초 간격)
+  useEffect(() => {
+    if (BUILD_HASH === 'dev') return // 로컬 환경은 제외
+    const checkVersion = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/version`)
+        const data = await res.json()
+        if (data.commitHash && data.commitHash !== 'unknown' && data.commitHash !== BUILD_HASH) {
+          setUpdateAvailable(true)
+        }
+      } catch (e) { /* ignore */ }
+    }
+    const interval = setInterval(checkVersion, 15000)
+    return () => clearInterval(interval)
+  }, [])
 
   function handleChatIdChange(v) {
     setChatId(v)
@@ -1080,6 +1099,13 @@ export default function App() {
           />
         </div>
       </header>
+
+      {/* 새 버전 업데이트 배너 */}
+      {updateAvailable && (
+        <div className="update-banner" onClick={() => window.location.reload(true)}>
+          🚀 새로운 버전의 예리가 배포되었습니다. 화면을 눌러 새로고침 하세요!
+        </div>
+      )}
 
       {/* 페이지 */}
       {page === 'watchlist' && (
