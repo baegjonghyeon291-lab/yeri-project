@@ -426,7 +426,7 @@ function WatchlistPage({ chatId, onBadgeCountChange, onGoPortfolio }) {
           {data.stocks.length === 0 ? (
             <div className="empty-state">
               <span className="big-emoji">📋</span>
-              <p>관심종목이 없습니다.<br />텔레그램에서 <b>/add AAPL</b> 로 추가하세요.</p>
+              <p>관심종목이 없습니다.<br />채팅 분석 후 우측 상단의 <b>Watchlist</b> 버튼으로 추가해보세요.</p>
             </div>
           ) : (
             <div className="stocks-grid">
@@ -1126,10 +1126,10 @@ export default function App() {
           <AlertBadge count={alertCount} onClick={() => setPage('watchlist')} />
           <input
             className="chatid-input"
-            placeholder="내 Chat ID"
+            placeholder="내 고유 닉네임"
             value={chatId}
             onChange={e => handleChatIdChange(e.target.value)}
-            title="텔레그램 chatId를 입력하면 내 관심종목이 표시됩니다"
+            title="원하는 닉네임(ID)을 입력하시면 나만의 포트폴리오 관리가 가능합니다"
           />
         </div>
       </header>

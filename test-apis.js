@@ -68,17 +68,7 @@ async function testOpenAI() {
     } catch(e) { fail(name, e.message); }
 }
 
-async function testTelegram() {
-    const name = 'TELEGRAM';
-    const key = keyStatus('TELEGRAM_BOT_TOKEN');
-    if (!key) { fail(name, '키 누락'); return; }
-    log(name, 'loaded');
-    try {
-        const r = await request(`https://api.telegram.org/bot${key}/getMe`);
-        if (r.status === 200 && r.body?.ok) ok(name, `bot=@${r.body.result.username}`);
-        else fail(name, `HTTP ${r.status} - ${r.body?.description || ''}`);
-    } catch(e) { fail(name, e.message); }
-}
+
 
 async function testNews() {
     const name = 'NEWS_API';
@@ -280,7 +270,6 @@ async function main() {
 
     const tests = [
         testOpenAI,
-        testTelegram,
         testNews,
         testFinnhub,
         testAlphaVantage,

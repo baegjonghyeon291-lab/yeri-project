@@ -1,6 +1,6 @@
 # 📈 AI 주식 분석 비서 (yeri-project)
 
-텔레그램 기반 GPT-4.1/o3 구동 주식 분석 봇입니다.
+웹앱(React) 기반 GPT-4.1/o3 구동 주식 분석 봇입니다.
 
 ## 프로젝트 구조
 
@@ -10,7 +10,6 @@ yeri-project/
 ├── .env                       # API 키 설정
 ├── .env.example               # 키 템플릿
 ├── services/
-│   ├── telegram.js            # 봇 + 스마트 라우팅
 │   ├── data-fetcher.js        # 7개 API 데이터 수집 (캐시/폴백)
 │   └── analyzer.js            # GPT 분석 엔진
 └── utils/
@@ -36,7 +35,6 @@ node index.js
 | 변수 | 필수 | 설명 |
 |------|------|------|
 | `OPENAI_API_KEY` | ✅ | OpenAI API 키 |
-| `TELEGRAM_BOT_TOKEN` | ✅ | 텔레그램 봇 토큰 |
 | `OPENAI_MODEL_DEFAULT` | - | 기본 모델 (기본값: gpt-4.1) |
 | `OPENAI_MODEL_DEEP` | - | 심층 분석 모델 (기본값: o3) |
 | `FINNHUB_API_KEY` | - | 주가/지수 데이터 |
@@ -49,16 +47,10 @@ node index.js
 
 ## 사용법
 
-### 텔레그램 명령어
-
-| 명령어 | 설명 |
-|--------|------|
-| `/start` | 도움말 |
-| `/market` | 전체 시장 분석 |
-| `/stock TSLA` | 종목 분석 |
-| `/watchlist` | 관심 종목 보기 |
-| `/add AAPL` | 관심 종목 추가 |
-| `/remove AAPL` | 관심 종목 제거 |
+### 웹 앱 주요 기능
+- 관심종목 알림: 목표가, 이상 급등락 알림
+- 포트폴리오 관리: 수익률 분석, 리스크 관리
+- 채팅형 스크리닝: 종목, 섹터, 시장 현황 질의응답
 
 ### 자연어 질문 예시
 
