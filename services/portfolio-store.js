@@ -6,7 +6,7 @@
 const fs   = require('fs');
 const path = require('path');
 
-const DATA_DIR   = path.join(__dirname, '..', 'data');
+const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const STORE_FILE = path.join(DATA_DIR, 'portfolio.json');
 const MAX_HOLDINGS = 20;
 
