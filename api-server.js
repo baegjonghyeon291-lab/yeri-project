@@ -231,7 +231,7 @@ app.post('/api/chat', async (req, res) => {
             const rebal = snap.rebalancing[0]?.replace(/[🔴🟢⚠️✅]|\[.*?\] /g, '').trim() || '특이사항 없음';
             
             const reply = `📊 **내 포트폴리오 요약 브리핑**
-- **오늘 상태 요약**: ${snap.healthScore.label} (${snap.healthScore.score}점)
+- **오늘 상태 요약**: ${snap.healthScore.label} (비중 가중평균 🌟${snap.healthScore.score}점)
 - **총 평가손익**: ${plSign}${snap.summary.totalProfitLossPct.toFixed(1)}%
 - **위험 종목 TOP**: ${riskTop}
 - **강세 종목 TOP**: ${strongTop}

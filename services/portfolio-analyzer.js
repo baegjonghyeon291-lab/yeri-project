@@ -242,12 +242,12 @@ const STRATEGY_TEMPLATES = {
         '변동성이 커지며 추세가 둔화되고 있습니다. 보수적 접근이 필요합니다.',
     ],
     '경고': [
-        '단기 하락 추세가 뚜렷합니다. 손실이 커지기 전에 비중 축소를 검토하세요.',
-        '주요 지표들이 부정적입니다. 추가매수보다 리스크 관리를 우선하세요.',
+        '단기 하락 추세가 뚜렷합니다. 추가 하락에 대비해 비중 축소를 검토해 보세요.',
+        '주요 지표들이 부정적입니다. 추가 매수보다는 리스크 관리에 집중하는 것이 좋습니다.',
     ],
     '리스크 높음': [
-        '하락 가속화 구간입니다. 기술적 반등 시 매도하거나 즉각적인 포트폴리오 점검이 필수적입니다.',
-        '대부분의 지표가 심각한 약세를 가리킵니다. 손절매 라인을 철저히 지키세요.',
+        '하락 가속화 구간입니다. 포트폴리오 비중 점검과 리스크 대응을 권장합니다.',
+        '대부분의 지표가 심각한 약세를 가리킵니다. 손절매 등 보수적 대응 기준을 점검해 보세요.',
     ]
 };
 
@@ -324,15 +324,22 @@ function analyzeHolding(stockData, holding) {
     const templates = STRATEGY_TEMPLATES[badgeInfo.badge] || STRATEGY_TEMPLATES['보통'];
     const strategy = templates[Math.floor(Math.random() * templates.length)];
 
-    // 보유 손익 반영 추가 문구
+    // 보유 손익 반영 기민한 문구 수정
     let profitNote = '';
     const currentPrice = safeNum(stockData.price?.current);
     if (currentPrice != null && holding.avgPrice > 0) {
         const pnlPct = ((currentPrice / holding.avgPrice) - 1) * 100;
-        if (pnlPct > 30 && badgeInfo.badge !== '경고') {
-            profitNote = ' 수익률이 높아 일부 익절도 검토 가능합니다.';
-        } else if (pnlPct < -15 && badgeInfo.badge === '경고') {
-            profitNote = ' 손실 확대 방지를 위한 손절 기준 설정을 권장합니다.';
+        
+        if (pnlPct > 20 && (badgeInfo.badge === '주의' || badgeInfo.badge === '경고' || badgeInfo.badge === '리스크 높음')) {
+            // 큰 수익 중인데 상태가 악화되는 경우
+            strategy = '단기 하락/추세 훼손 신호가 발생했습니다. 수익이 큰 상태이므로 일부 이익 실현(수익 보호)을 우선적으로 검토하는 것이 유리할 수 있습니다.';
+            profitNote = '';
+        } else {
+            if (pnlPct > 30 && badgeInfo.badge !== '경고' && badgeInfo.badge !== '리스크 높음') {
+                profitNote = ' (수익률이 높아 수익 실현 전략도 고려 가능)';
+            } else if (pnlPct < -15 && (badgeInfo.badge === '경고' || badgeInfo.badge === '리스크 높음')) {
+                profitNote = ' (손실 확대 방지를 위한 보수적 대응 권장)';
+            }
         }
     }
 
@@ -375,7 +382,7 @@ function buildPortfolioSummary(holdingsWithStatus) {
     // 리스크 TOP3 (점수 낮은 순)
     summary.riskTop3 = sorted.slice(0, 3)
         .filter(h => h.status?.overall != null && h.status.overall < 50)
-        .map(h => ({ ticker: h.ticker, name: h.name, score: h.status.overall, badge: h.status.badge }));
+        .map(h => ({ ticker: h.ticker, name: h.name, score: h.status.overall, badge: h.status.badge, reason: h.status?.reasons?.length > 0 ? h.status.reasons.join(", ") : "종합 평가 지표 하락" }));
 
     // 강세 TOP3 (점수 높은 순)
     summary.strongTop3 = sorted.reverse().slice(0, 3)
@@ -496,7 +503,7 @@ function buildDailyBriefing(summary, health, holdings) {
     const widget = `오늘 상태: ${health.label} | 손익 ${plClass}${profitLossPct.toFixed(1)}% | 리스크 체크: ${riskTicker}`;
 
     return {
-        text: `[ 일일 포트폴리오 브리핑 ]\n- 종합 상태: ${health.label} (${health.score}점)\n- 총 평가손익: ${plClass}${profitLossPct.toFixed(1)}%\n- 오늘 가장 강세인 종목: ${strongTicker}\n- 오늘 점검이 필요한 종목: ${riskTicker}\n- 한줄 결론: ${oneLiner}`,
+        text: `[ 일일 포트폴리오 브리핑 ]\n- 종합 상태: ${health.label} (가중 평균 ${health.score}점)\n- 총 평가손익: ${plClass}${profitLossPct.toFixed(1)}%\n- 오늘 가장 강세인 종목: ${strongTicker}\n- 단기 추세 약화/점검 요망 종목: ${riskTicker !== '-' ? `${riskTicker} (${summary.riskTop3[0]?.reason})` : '-'}\n- 한줄 결론: ${oneLiner}`,
         widget,
         oneLiner
     };
