@@ -1098,6 +1098,8 @@ export default function App() {
     localStorage.setItem('yeri_chatId', v)
   }
 
+  const effectiveId = chatId.trim() || 'webapp'
+
   return (
     <div className="app">
       {/* 탑바 */}
@@ -1134,10 +1136,10 @@ export default function App() {
 
       {/* 페이지 */}
       {page === 'watchlist' && (
-        <WatchlistPage chatId={chatId} onBadgeCountChange={setAlertCount} onGoPortfolio={() => setPage('portfolio')} />
+        <WatchlistPage chatId={effectiveId} onBadgeCountChange={setAlertCount} onGoPortfolio={() => setPage('portfolio')} />
       )}
-      {page === 'portfolio' && <PortfolioPage userId={chatId} />}
-      {page === 'chat' && <ChatPage chatId={chatId} />}
+      {page === 'portfolio' && <PortfolioPage userId={effectiveId} />}
+      {page === 'chat' && <ChatPage chatId={effectiveId} />}
     </div>
   )
 }
