@@ -51,12 +51,21 @@ function gcDedupe() {
 const POS_KW = ['beat', 'surge', 'record', 'growth', 'buy', 'upgrade', 'bullish', '급등', '호실적', '매수', '상향', 'strong', 'profit'];
 const NEG_KW = ['miss', 'fall', 'drop', 'downgrade', 'sell', 'bearish', 'layoff', '급락', '어닝쇼크', '매도', '하향', 'lawsuit', 'tariff', 'loss', 'weak'];
 
+function getSentiment(title) {
+    const t = (title || '').toLowerCase();
+    const isPos = POS_KW.some(k => t.includes(k));
+    const isNeg = NEG_KW.some(k => t.includes(k));
+    if (isPos && !isNeg) return 'POSITIVE';
+    if (isNeg && !isPos) return 'NEGATIVE';
+    return 'NEUTRAL';
+}
+
 function analyzeNews(news = []) {
     let pos = 0, neg = 0;
     for (const a of news.slice(0, 10)) {
-        const t = (a.title || '').toLowerCase();
-        if (POS_KW.some(k => t.includes(k))) pos++;
-        if (NEG_KW.some(k => t.includes(k))) neg++;
+        const s = getSentiment(a.title);
+        if (s === 'POSITIVE') pos++;
+        if (s === 'NEGATIVE') neg++;
     }
     return { pos, neg, total: news.length };
 }
@@ -165,6 +174,15 @@ async function checkTicker(chatId, ticker) {
         }
         prevVerdictMap.set(prevKey, curVerdict);
 
+        // ── 뉴스 감성 라벨링 (최대 3개 반환) ───────────────
+        const recentNews = (data.news || []).slice(0, 3).map(n => ({
+            title: n.title,
+            url: n.url,
+            source: n.source,
+            datetime: n.datetime,
+            sentiment: getSentiment(n.title)
+        }));
+
         // ── 현재 상태 요약 ───────────────────────────────────
         return {
             ticker,
@@ -178,6 +196,7 @@ async function checkTicker(chatId, ticker) {
             suggestedAction: score.suggestedAction,
             priceSource: data.price?.source || '-',
             alerts,
+            recentNews,
         };
     } catch (e) {
         console.warn(`[AlertEngine] ${ticker} 체크 실패: ${e.message}`);

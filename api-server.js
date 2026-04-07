@@ -892,6 +892,26 @@ app.get('/api/portfolio/:userId', async (req, res) => {
     }
 });
 
+// ==== [신규] 환경 설정 라우트 ====
+app.get('/api/settings/:userId', (req, res) => {
+    try {
+        const settings = userSettings.get(req.params.userId);
+        res.json(settings);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/settings/:userId', (req, res) => {
+    try {
+        const patch = req.body;
+        const updated = userSettings.set(req.params.userId, patch);
+        res.json(updated);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ==== [신규] 포트폴리오 알림 라우트 ====
 app.get('/api/notifications/:userId', (req, res) => {
     try {
