@@ -1076,6 +1076,7 @@ export default function App() {
   const [page, setPage] = useState('watchlist') // 'watchlist' | 'chat' | 'portfolio'
   const [chatId, setChatId] = useState(() => localStorage.getItem('yeri_chatId') || '')
   const [alertCount, setAlertCount] = useState(0)
+  const [hasUpdate, setHasUpdate] = useState(false)
   // 자동 버전 체크 (앱 진입 및 백그라운드 복귀 시)
   useEffect(() => {
     async function autoCheckUpdate() {
@@ -1083,9 +1084,7 @@ export default function App() {
         const res = await fetch(`${API_BASE}/version`)
         const data = await res.json()
         if (data.commitHash && data.commitHash !== 'unknown' && data.commitHash !== BUILD_HASH) {
-          if (confirm('🚀 새로운 업데이트 버전이 배포되었습니다!\n원활한 이용을 위해 지금 확인을 눌러 최신 버전으로 새로고침해주세요.')) {
-            window.location.reload(true)
-          }
+          setHasUpdate(true)
         }
       } catch (e) {
         // 백그라운드 체크 실패 시 조용히 무시
@@ -1112,8 +1111,10 @@ export default function App() {
       const res = await fetch(`${API_BASE}/version`)
       const data = await res.json()
       if (data.commitHash && data.commitHash !== 'unknown' && data.commitHash !== BUILD_HASH) {
-        alert('🚀 새로운 업데이트 버전이 발견되었습니다!\n확인을 누르시면 최신 버전으로 새로고침됩니다.')
-        window.location.reload(true)
+        setHasUpdate(true)
+        if (confirm('🚀 새로운 업데이트 버전이 발견되었습니다!\n확인을 누르시면 최신 버전으로 새로고침됩니다.')) {
+          window.location.reload(true)
+        }
       } else {
         alert('✅ 이미 최신 버전이 성공적으로 반영되어 있습니다!\n(정상적으로 업데이트가 완료된 상태입니다)')
       }
@@ -1131,6 +1132,11 @@ export default function App() {
 
   return (
     <div className="app">
+      {hasUpdate && (
+        <div className="update-banner" onClick={() => window.location.reload(true)} style={{ background: '#28a745', color: '#fff', padding: '12px', textAlign: 'center', fontWeight: 'bold', cursor: 'pointer', zIndex: 9999, position: 'sticky', top: 0, boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+          🚀 새로운 업데이트 버전이 있습니다! 여기를 터치하여 새로고침
+        </div>
+      )}
       {/* 탑바 */}
       <header className="topbar">
         <span className="topbar-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
