@@ -84,18 +84,23 @@ async function generateDailyBriefingText(tickers, isManual = false) {
         return `관심종목이 아직 없어요.\n아래 입력창에서 티커를 추가해보세요! (예: NVDA, 005930)`;
     }
 
-    console.log(`[BriefingService] 브리핑 생성 중: ${tickers.join(', ')}`);
+    console.log(`[BriefingService] 브리핑 생성 중 (${tickers.length}개): ${tickers.join(', ')}`);
 
-    // 병렬 데이터 수집
-    const rawResults = await Promise.all(tickers.map(async (ticker) => {
+    // 순차 데이터 수집 — 무료 API 속도제한(Rate Limit) 방지
+    const rawResults = [];
+    for (const ticker of tickers) {
         try {
             const data = await fetchAllStockData(ticker);
-            return extractStockSummary(data);
+            rawResults.push(extractStockSummary(data));
         } catch (err) {
             console.error(`[BriefingService] ${ticker} 실패:`, err.message);
-            return { ticker, name: ticker, hasData: false, newsBlock: '  최신 뉴스 부족' };
+            rawResults.push({ ticker, name: ticker, hasData: false, newsBlock: '  최신 뉴스 부족' });
         }
-    }));
+        // 다음 종목 요청 전 300ms 대기 — API Rate Limit 여유 확보
+        if (tickers.indexOf(ticker) < tickers.length - 1) {
+            await new Promise(r => setTimeout(r, 300));
+        }
+    }
 
     if (!rawResults.some(r => r.hasData)) {
         return `데이터 수집에 문제가 있어요. 잠시 후 다시 시도해주세요.`;
@@ -164,13 +169,22 @@ ${dataBlock}
             messages: [
                 {
                     role: 'system',
-                    content: '너는 "예리"라는 AI 투자 비서야. 차분하고 근거 기반의 투자 브리핑을 해. 각 종목마다 5개 섹션(종목요약/기술분석/수급흐름/뉴스이슈/종합판단+전략)을 반드시 포함해. 데이터가 없으면 절대 수치를 만들어내지 마.'
+                    content: '너는 "예리"라는 AI 투자 비서야. 차분하고 근거 기반의 투자 브리핑을 해. 각 종목마다 5개 섹션(종목요약/기술분석/수급흐름/뉴스이슈/종합판단+전략)을 반드시 포함해. 데이터가 없으면 절대 수치를 만들어내지 마. 각 섹션은 핵심만 간결하게 써서 반드시 모든 종목을 빠짐없이 분석 완료해.'
                 },
                 { role: 'user', content: prompt }
             ],
-            max_tokens: 3000,
+            max_tokens: 4500,
         });
-        return response.choices[0].message.content;
+
+        // 출력 잘림 감지 — finish_reason이 'length'이면 토큰 한도에 걸린 것
+        const finishReason = response.choices[0].finish_reason;
+        let content = response.choices[0].message.content;
+        if (finishReason === 'length') {
+            console.warn(`⚠️ [BriefingService] 브리핑 출력이 max_tokens(4500)에 의해 잘렸습니다.`);
+            content += '\n\n⚠️ 브리핑이 길어져 일부가 생략되었습니다. 관심종목 수를 줄이면 더 상세한 분석을 받아보실 수 있어요.';
+        }
+        console.log(`[BriefingService] 브리핑 완료 (finish: ${finishReason}, tokens: ${response.usage?.completion_tokens || '?'})`);
+        return content;
     } catch (err) {
         console.error(`❌ [generateDailyBriefingText] 실패:`, err.message);
         throw err;

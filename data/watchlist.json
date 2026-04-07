@@ -5,5 +5,9 @@
       "TSLA"
     ],
     "style": "swing"
+  },
+  "test-briefing": {
+    "tickers": [],
+    "style": "swing"
   }
 }

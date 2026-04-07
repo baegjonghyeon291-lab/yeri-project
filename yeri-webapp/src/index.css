@@ -728,3 +728,468 @@ a { color: inherit; text-decoration: none; }
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ═══════════════════════════════════════════════
+   포트폴리오 대시보드 스타일
+═══════════════════════════════════════════════ */
+
+/* ─── 요약 카드 ─────────────────────────────── */
+.pf-summary-card {
+  background: linear-gradient(135deg, rgba(18,22,33,.95), rgba(26,32,48,.9));
+  border: 1px solid rgba(240,180,41,.15);
+  border-radius: var(--radius);
+  padding: 22px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 30px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04);
+  backdrop-filter: blur(8px);
+}
+.pf-summary-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 16px;
+}
+.pf-summary-title {
+  font-size: 1.05rem; font-weight: 700;
+  background: linear-gradient(135deg, var(--gold), #f97316);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.pf-summary-count {
+  font-size: .78rem; font-weight: 600;
+  background: var(--surface2); color: var(--text-sub);
+  padding: 3px 10px; border-radius: 12px;
+}
+.pf-summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px; margin-bottom: 16px;
+}
+.pf-summary-item {
+  background: rgba(255,255,255,.03);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.pf-summary-pl { grid-column: 1 / -1; }
+.pf-summary-label {
+  font-size: .72rem; color: var(--text-muted); font-weight: 500;
+  margin-bottom: 4px; text-transform: uppercase; letter-spacing: .3px;
+}
+.pf-summary-value {
+  font-size: 1.15rem; font-weight: 700; color: var(--text);
+}
+.pf-summary-value.pf-up { color: var(--green); }
+.pf-summary-value.pf-down { color: var(--red); }
+.pf-pct {
+  font-size: .82rem; font-weight: 600;
+  margin-left: 6px; opacity: .85;
+}
+
+/* ─── 배지 카운트 태그 ──────────────────────── */
+.pf-badge-counts {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-bottom: 14px;
+}
+.pf-badge-tag {
+  font-size: .75rem; font-weight: 600;
+  padding: 4px 10px; border-radius: 16px;
+}
+.pf-badge-bullish { background: var(--green-dim); color: var(--green); }
+.pf-badge-normal { background: rgba(148,163,184,.12); color: var(--text-sub); }
+.pf-badge-caution { background: var(--gold-dim); color: var(--gold); }
+.pf-badge-warning { background: var(--red-dim); color: var(--red); }
+
+/* ─── TOP3 영역 ─────────────────────────────── */
+.pf-top3-wrap {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px; margin-bottom: 16px;
+}
+.pf-top3-section {
+  background: rgba(255,255,255,.02);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.pf-top3-label {
+  font-size: .75rem; font-weight: 700;
+  color: var(--text-sub);
+  margin-bottom: 8px;
+}
+.pf-top3-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 0;
+  font-size: .8rem;
+  border-bottom: 1px solid var(--border);
+}
+.pf-top3-item:last-child { border-bottom: none; }
+.pf-top3-ticker {
+  font-weight: 700; min-width: 55px;
+}
+.pf-top3-strong .pf-top3-ticker { color: var(--green); }
+.pf-top3-risk .pf-top3-ticker { color: var(--red); }
+.pf-top3-name {
+  flex: 1; color: var(--text-sub); font-size: .75rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pf-top3-score {
+  font-size: .72rem; font-weight: 600;
+  padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,255,255,.05); color: var(--text-sub);
+}
+
+/* ─── 브리핑 버튼 ──────────────────────────── */
+.pf-briefing-btn {
+  width: 100%;
+  background: linear-gradient(135deg, rgba(240,180,41,.15), rgba(249,115,22,.1));
+  border: 1px solid rgba(240,180,41,.3);
+  color: var(--gold);
+  font-weight: 700; font-size: .88rem;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all .2s;
+  font-family: inherit;
+}
+.pf-briefing-btn:hover {
+  background: linear-gradient(135deg, rgba(240,180,41,.25), rgba(249,115,22,.18));
+  border-color: var(--gold);
+  box-shadow: var(--glow-gold);
+}
+.pf-briefing-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ─── 브리핑 카드 ──────────────────────────── */
+.pf-briefing-card {
+  background: var(--surface);
+  border: 1px solid rgba(240,180,41,.2);
+  border-radius: var(--radius);
+  padding: 0;
+  margin-bottom: 20px;
+  overflow: hidden;
+  animation: slideDown .3s ease;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pf-briefing-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px;
+  background: rgba(240,180,41,.06);
+  border-bottom: 1px solid var(--border);
+}
+.pf-briefing-title {
+  font-size: .95rem; font-weight: 700; color: var(--gold);
+}
+.pf-briefing-close {
+  background: none; border: none; color: var(--text-sub);
+  font-size: 1.1rem; cursor: pointer; padding: 4px 8px;
+  border-radius: 4px; transition: all .15s;
+  min-height: auto;
+}
+.pf-briefing-close:hover { background: var(--surface2); color: var(--text); }
+.pf-briefing-body {
+  padding: 18px;
+  font-size: .88rem;
+  line-height: 1.75;
+  color: var(--text);
+  white-space: pre-wrap;
+  max-height: 60vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ─── 보유종목 그리드 ──────────────────────── */
+.pf-holdings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  padding-bottom: 80px; /* FAB 공간 확보 */
+}
+
+/* ─── 보유종목 카드 ────────────────────────── */
+.pf-holding-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: all .2s;
+  position: relative;
+}
+.pf-holding-card:hover {
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+.pf-border-bullish { border-left: 3px solid var(--green); }
+.pf-border-normal  { border-left: 3px solid var(--text-muted); }
+.pf-border-caution { border-left: 3px solid var(--gold); }
+.pf-border-warning { border-left: 3px solid var(--red); }
+
+.pf-holding-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 10px;
+}
+.pf-holding-ticker { font-size: 1rem; font-weight: 700; color: var(--gold); }
+.pf-holding-name { font-size: .75rem; color: var(--text-sub); margin-top: 1px; }
+
+.pf-holding-actions {
+  display: flex; align-items: center; gap: 8px;
+  position: relative;
+}
+.pf-holding-badge {
+  font-size: .72rem; font-weight: 700;
+  padding: 3px 8px; border-radius: 10px;
+  white-space: nowrap;
+}
+
+.pf-menu-btn {
+  background: none; border: none; color: var(--text-sub);
+  font-size: 1.2rem; cursor: pointer; padding: 2px 6px;
+  border-radius: 4px; transition: all .15s;
+  min-height: auto; line-height: 1;
+}
+.pf-menu-btn:hover { background: var(--surface2); color: var(--text); }
+
+.pf-dropdown {
+  position: absolute;
+  top: 100%; right: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 0;
+  min-width: 110px;
+  z-index: 50;
+  box-shadow: var(--shadow);
+  animation: fadeIn .15s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pf-dropdown button {
+  display: block; width: 100%;
+  background: none; border: none; color: var(--text);
+  text-align: left; padding: 8px 14px;
+  font-size: .82rem; cursor: pointer;
+  transition: background .15s;
+  min-height: auto; font-family: inherit;
+}
+.pf-dropdown button:hover { background: rgba(255,255,255,.06); }
+
+/* ─── 종목 가격 및 상세 ────────────────────── */
+.pf-holding-price-row {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 12px;
+}
+.pf-holding-price { font-size: 1.25rem; font-weight: 700; }
+
+.pf-holding-details {
+  background: rgba(255,255,255,.02);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.pf-detail-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 0;
+  font-size: .8rem;
+}
+.pf-detail-label { color: var(--text-muted); }
+.pf-detail-value { font-weight: 600; color: var(--text); }
+.pf-detail-value.pf-up { color: var(--green); }
+.pf-detail-value.pf-down { color: var(--red); }
+.pf-detail-pl { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 4px; }
+
+/* ─── 7팩터 스코어 미니바 ──────────────────── */
+.pf-scores-mini {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-bottom: 12px;
+}
+.pf-score-bar-row {
+  display: flex; align-items: center; gap: 6px;
+}
+.pf-score-label {
+  font-size: .68rem; color: var(--text-muted);
+  width: 44px; text-align: right; flex-shrink: 0;
+}
+.pf-score-bar-bg {
+  flex: 1; height: 6px;
+  background: rgba(255,255,255,.06);
+  border-radius: 3px; overflow: hidden;
+}
+.pf-score-bar-fill {
+  height: 100%; border-radius: 3px;
+  transition: width .5s ease;
+}
+.pf-bar-high { background: linear-gradient(90deg, var(--green), #4ade80); }
+.pf-bar-mid  { background: linear-gradient(90deg, var(--gold), #fbbf24); }
+.pf-bar-low  { background: linear-gradient(90deg, var(--red), #f87171); }
+.pf-score-val {
+  font-size: .68rem; font-weight: 600; color: var(--text-sub);
+  width: 22px; text-align: right; flex-shrink: 0;
+}
+
+/* ─── 전략 문구 & 이유 태그 ────────────────── */
+.pf-strategy {
+  font-size: .8rem; color: var(--text-sub);
+  line-height: 1.55;
+  padding: 8px 10px;
+  background: rgba(240,180,41,.04);
+  border-left: 2px solid rgba(240,180,41,.3);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin-bottom: 10px;
+}
+.pf-reasons {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 8px;
+}
+.pf-reason-tag {
+  font-size: .7rem; font-weight: 500;
+  padding: 3px 8px; border-radius: 10px;
+  background: var(--surface2);
+  color: var(--text-sub);
+  border: 1px solid var(--border);
+}
+
+/* ─── 메모 ──────────────────────────────────── */
+.pf-memo {
+  font-size: .75rem; color: var(--text-muted);
+  padding: 6px 10px;
+  background: rgba(255,255,255,.02);
+  border-radius: var(--radius-sm);
+  margin-top: 4px;
+}
+
+/* ─── FAB 버튼 ──────────────────────────────── */
+.pf-fab {
+  position: fixed;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  right: 24px;
+  background: linear-gradient(135deg, #f0b429, #f97316);
+  color: #000; font-weight: 700; font-size: .9rem;
+  border: none; border-radius: 28px;
+  padding: 14px 24px;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(240,180,41,.4);
+  transition: all .2s;
+  z-index: 80;
+  font-family: inherit;
+}
+.pf-fab:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 28px rgba(240,180,41,.5);
+}
+.pf-fab:active { transform: translateY(0); }
+
+/* ─── 모달 ──────────────────────────────────── */
+.pf-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.65);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: flex-end; justify-content: center;
+  z-index: 200;
+  animation: fadeIn .2s ease;
+}
+.pf-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  width: 100%; max-width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+  animation: slideUp .3s ease;
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.pf-modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 1rem; font-weight: 700;
+}
+.pf-modal-close {
+  background: none; border: none; color: var(--text-sub);
+  font-size: 1.2rem; cursor: pointer; padding: 4px 8px;
+  border-radius: 4px; transition: all .15s;
+  min-height: auto;
+}
+.pf-modal-close:hover { background: var(--surface2); color: var(--text); }
+
+.pf-modal-body { padding: 20px; }
+.pf-form-label {
+  display: block;
+  font-size: .78rem; color: var(--text-sub); font-weight: 600;
+  margin-bottom: 14px;
+}
+.pf-form-input {
+  display: block; width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: .88rem;
+  outline: none;
+  margin-top: 6px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.pf-form-input:focus { border-color: var(--gold); }
+.pf-form-input:disabled { opacity: .5; }
+.pf-form-row {
+  display: flex; gap: 12px;
+}
+.pf-form-half { flex: 1; }
+
+.pf-modal-footer {
+  display: flex; gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.pf-modal-cancel {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-sub);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: .88rem; font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.pf-modal-cancel:hover { border-color: var(--text-muted); color: var(--text); }
+.pf-modal-submit {
+  flex: 1;
+  background: linear-gradient(135deg, #f0b429, #f97316);
+  color: #000;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: .88rem; font-weight: 700;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.pf-modal-submit:hover { opacity: .85; }
+.pf-modal-submit:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ─── 포트폴리오 반응형 ────────────────────── */
+@media (max-width: 640px) {
+  .pf-summary-card { padding: 16px; }
+  .pf-summary-grid { grid-template-columns: 1fr; }
+  .pf-summary-value { font-size: 1rem; }
+  .pf-top3-wrap { grid-template-columns: 1fr; }
+  .pf-holdings-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .pf-holding-card { padding: 14px; }
+  .pf-holding-price { font-size: 1.1rem; }
+  .pf-fab {
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    right: 16px;
+    padding: 12px 20px;
+    font-size: .85rem;
+  }
+  .pf-modal { max-height: 90vh; }
+  .pf-briefing-body { padding: 14px; font-size: .82rem; }
+}
+

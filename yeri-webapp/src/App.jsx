@@ -415,9 +415,482 @@ function WatchlistPage({ chatId, onBadgeCountChange }) {
   )
 }
 
+// ── 포트폴리오 페이지 ─────────────────────────────────────────────
+function PortfolioPage({ userId }) {
+  const [holdings, setHoldings] = useState([])
+  const [summary, setSummary] = useState(null)
+  const [portfolioStatus, setPortfolioStatus] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [lastUpdated, setLastUpdated] = useState(null)
+
+  // 모달
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editingHolding, setEditingHolding] = useState(null) // null = 추가 모드, { ticker,... } = 수정 모드
+  const [menuOpen, setMenuOpen] = useState(null) // ticker of open menu
+
+  // 브리핑
+  const [briefingReport, setBriefingReport] = useState(null)
+  const [briefingLoading, setBriefingLoading] = useState(false)
+  const [showBriefing, setShowBriefing] = useState(false)
+
+  // 폼 state
+  const [formTicker, setFormTicker] = useState('')
+  const [formName, setFormName] = useState('')
+  const [formQty, setFormQty] = useState('')
+  const [formPrice, setFormPrice] = useState('')
+  const [formMemo, setFormMemo] = useState('')
+
+  const fetchPortfolio = useCallback(async () => {
+    if (!userId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`${API_BASE}/portfolio/${userId}`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setHoldings(data.holdings || [])
+      setSummary(data.summary || null)
+      setPortfolioStatus(data.portfolioStatus || null)
+      setLastUpdated(Date.now())
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [userId])
+
+  useEffect(() => { fetchPortfolio() }, [fetchPortfolio])
+
+  // 종목 추가
+  async function handleAdd() {
+    if (!formTicker || !formQty || !formPrice) return
+    try {
+      await fetch(`${API_BASE}/portfolio/${userId}/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticker: formTicker.toUpperCase(),
+          name: formName || formTicker.toUpperCase(),
+          quantity: Number(formQty),
+          avgPrice: Number(formPrice),
+          memo: formMemo || null,
+        })
+      })
+      closeModal()
+      fetchPortfolio()
+    } catch (e) { setError(e.message) }
+  }
+
+  // 종목 수정
+  async function handleUpdate() {
+    if (!editingHolding) return
+    try {
+      await fetch(`${API_BASE}/portfolio/${userId}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticker: editingHolding.ticker,
+          name: formName || undefined,
+          quantity: formQty ? Number(formQty) : undefined,
+          avgPrice: formPrice ? Number(formPrice) : undefined,
+        })
+      })
+      closeModal()
+      fetchPortfolio()
+    } catch (e) { setError(e.message) }
+  }
+
+  // 종목 삭제
+  async function handleRemove(ticker) {
+    if (!confirm(`${ticker} 종목을 삭제하시겠습니까?`)) return
+    try {
+      await fetch(`${API_BASE}/portfolio/${userId}/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker })
+      })
+      setMenuOpen(null)
+      fetchPortfolio()
+    } catch (e) { setError(e.message) }
+  }
+
+  // 브리핑 요청
+  async function fetchBriefing() {
+    setBriefingLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/portfolio/${userId}/briefing`)
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setBriefingReport(data.report || '브리핑 데이터가 없습니다.')
+      setShowBriefing(true)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBriefingLoading(false)
+    }
+  }
+
+  function openAddModal() {
+    setEditingHolding(null)
+    setFormTicker(''); setFormName(''); setFormQty(''); setFormPrice(''); setFormMemo('')
+    setShowAddModal(true)
+  }
+
+  function openEditModal(h) {
+    setEditingHolding(h)
+    setFormTicker(h.ticker); setFormName(h.name); setFormQty(String(h.quantity)); setFormPrice(String(h.avgPrice)); setFormMemo(h.memo || '')
+    setShowAddModal(true)
+    setMenuOpen(null)
+  }
+
+  function closeModal() {
+    setShowAddModal(false)
+    setEditingHolding(null)
+    setFormTicker(''); setFormName(''); setFormQty(''); setFormPrice(''); setFormMemo('')
+  }
+
+  // 외부 클릭으로 메뉴 닫기
+  useEffect(() => {
+    if (!menuOpen) return
+    const handler = () => setMenuOpen(null)
+    setTimeout(() => document.addEventListener('click', handler), 0)
+    return () => document.removeEventListener('click', handler)
+  }, [menuOpen])
+
+  if (!userId) {
+    return (
+      <div className="main">
+        <div className="empty-state">
+          <span className="big-emoji">💼</span>
+          <p>상단에 Chat ID를 입력하면<br />포트폴리오가 표시됩니다.</p>
+        </div>
+      </div>
+    )
+  }
+
+  const plClass = summary?.totalProfitLoss >= 0 ? 'up' : 'down'
+  const plSign = summary?.totalProfitLoss >= 0 ? '+' : ''
+
+  return (
+    <div className="main">
+      {/* 섹션 헤더 */}
+      <div className="section-header">
+        <span className="section-title">💼 내 포트폴리오</span>
+        <span className="section-sub">
+          {lastUpdated ? `${timeAgo(lastUpdated)} 갱신` : ''}
+        </span>
+        <button className="refresh-btn" onClick={fetchPortfolio} disabled={loading}>
+          {loading ? '로딩 중...' : '새로고침'}
+        </button>
+      </div>
+
+      {error && <div className="error-bar">⚠️ {error}</div>}
+
+      {loading && !holdings.length && (
+        <div className="loading-wrap">
+          <div className="spinner" />
+          <span>포트폴리오 분석 중... (종목당 수초 소요)</span>
+        </div>
+      )}
+
+      {/* ── 전체 요약 카드 ── */}
+      {summary && summary.holdingCount > 0 && (
+        <div className="pf-summary-card">
+          <div className="pf-summary-header">
+            <div className="pf-summary-title">포트폴리오 요약</div>
+            <div className="pf-summary-count">{summary.holdingCount}종목</div>
+          </div>
+
+          <div className="pf-summary-grid">
+            <div className="pf-summary-item">
+              <div className="pf-summary-label">총 투자금</div>
+              <div className="pf-summary-value">${summary.totalInvested?.toLocaleString()}</div>
+            </div>
+            <div className="pf-summary-item">
+              <div className="pf-summary-label">총 평가액</div>
+              <div className="pf-summary-value">${summary.totalValue?.toLocaleString()}</div>
+            </div>
+            <div className="pf-summary-item pf-summary-pl">
+              <div className="pf-summary-label">총 평가손익</div>
+              <div className={`pf-summary-value pf-${plClass}`}>
+                {plSign}${Math.abs(summary.totalProfitLoss || 0).toLocaleString()}
+                <span className="pf-pct">({plSign}{summary.totalProfitLossPct || 0}%)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 상태 배지 카운트 */}
+          {portfolioStatus && (
+            <div className="pf-badge-counts">
+              {portfolioStatus.bullishCount > 0 && <span className="pf-badge-tag pf-badge-bullish">📈 상승우세 {portfolioStatus.bullishCount}</span>}
+              {portfolioStatus.normalCount > 0 && <span className="pf-badge-tag pf-badge-normal">➡️ 보통 {portfolioStatus.normalCount}</span>}
+              {portfolioStatus.cautionCount > 0 && <span className="pf-badge-tag pf-badge-caution">⚠️ 주의 {portfolioStatus.cautionCount}</span>}
+              {portfolioStatus.warningCount > 0 && <span className="pf-badge-tag pf-badge-warning">🚨 경고 {portfolioStatus.warningCount}</span>}
+            </div>
+          )}
+
+          {/* TOP3 그리드 */}
+          {portfolioStatus && (
+            <div className="pf-top3-wrap">
+              {portfolioStatus.strongTop3?.length > 0 && (
+                <div className="pf-top3-section">
+                  <div className="pf-top3-label">💪 강세 TOP</div>
+                  {portfolioStatus.strongTop3.map(s => (
+                    <div key={s.ticker} className="pf-top3-item pf-top3-strong">
+                      <span className="pf-top3-ticker">{s.ticker}</span>
+                      <span className="pf-top3-name">{s.name}</span>
+                      <span className="pf-top3-score">{s.score}점</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {portfolioStatus.riskTop3?.length > 0 && (
+                <div className="pf-top3-section">
+                  <div className="pf-top3-label">⚠️ 리스크 TOP</div>
+                  {portfolioStatus.riskTop3.map(s => (
+                    <div key={s.ticker} className="pf-top3-item pf-top3-risk">
+                      <span className="pf-top3-ticker">{s.ticker}</span>
+                      <span className="pf-top3-name">{s.name}</span>
+                      <span className="pf-top3-score">{s.score}점</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 브리핑 버튼 */}
+          <button className="pf-briefing-btn" onClick={fetchBriefing} disabled={briefingLoading}>
+            {briefingLoading ? '⏳ 브리핑 생성 중...' : '📋 AI 포트폴리오 브리핑'}
+          </button>
+        </div>
+      )}
+
+      {/* ── 브리핑 화면 ── */}
+      {showBriefing && briefingReport && (
+        <div className="pf-briefing-card">
+          <div className="pf-briefing-header">
+            <span className="pf-briefing-title">📋 AI 포트폴리오 브리핑</span>
+            <button className="pf-briefing-close" onClick={() => setShowBriefing(false)}>✕</button>
+          </div>
+          <div className="pf-briefing-body">{briefingReport}</div>
+        </div>
+      )}
+
+      {/* ── 보유종목 카드 리스트 ── */}
+      {holdings.length > 0 && (
+        <>
+          <div className="section-header" style={{ marginTop: 28 }}>
+            <span className="section-title">📊 보유종목 현황</span>
+            <span className="section-sub">{holdings.length}종목</span>
+          </div>
+          <div className="pf-holdings-grid">
+            {holdings.map(h => {
+              const hPlClass = (h.profitLossPct || 0) >= 0 ? 'up' : 'down'
+              const hPlSign = (h.profitLossPct || 0) >= 0 ? '+' : ''
+              const badge = h.status?.badge || '보통'
+              const emoji = h.status?.emoji || '➡️'
+              const badgeClass = badge === '상승우세' ? 'bullish' : badge === '주의' ? 'caution' : badge === '경고' ? 'warning' : 'normal'
+
+              return (
+                <div key={h.ticker} className={`pf-holding-card pf-border-${badgeClass}`}>
+                  {/* 카드 헤더 */}
+                  <div className="pf-holding-header">
+                    <div>
+                      <div className="pf-holding-ticker">{h.ticker}</div>
+                      <div className="pf-holding-name">{h.name !== h.ticker ? h.name : ''}</div>
+                    </div>
+                    <div className="pf-holding-actions">
+                      <span className={`pf-holding-badge pf-badge-${badgeClass}`}>{emoji} {badge}</span>
+                      <button className="pf-menu-btn" onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === h.ticker ? null : h.ticker) }}>⋯</button>
+                      {menuOpen === h.ticker && (
+                        <div className="pf-dropdown">
+                          <button onClick={() => openEditModal(h)}>✏️ 수정</button>
+                          <button onClick={() => handleRemove(h.ticker)}>🗑️ 삭제</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 가격 및 손익 */}
+                  <div className="pf-holding-price-row">
+                    <span className="pf-holding-price">
+                      {h.currentPrice != null ? `$${Number(h.currentPrice).toLocaleString()}` : 'N/A'}
+                    </span>
+                    {h.changePct != null && (
+                      <span className={`stock-change ${h.changePct >= 0 ? 'up' : 'down'}`}>
+                        {h.changePct >= 0 ? '+' : ''}{Number(h.changePct).toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="pf-holding-details">
+                    <div className="pf-detail-row">
+                      <span className="pf-detail-label">평단가</span>
+                      <span className="pf-detail-value">${Number(h.avgPrice).toLocaleString()}</span>
+                    </div>
+                    <div className="pf-detail-row">
+                      <span className="pf-detail-label">수량</span>
+                      <span className="pf-detail-value">{h.quantity}주</span>
+                    </div>
+                    <div className="pf-detail-row">
+                      <span className="pf-detail-label">투자금</span>
+                      <span className="pf-detail-value">${Number(h.investedAmount || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="pf-detail-row">
+                      <span className="pf-detail-label">평가액</span>
+                      <span className="pf-detail-value">{h.currentValue != null ? `$${Number(h.currentValue).toLocaleString()}` : '-'}</span>
+                    </div>
+                    <div className="pf-detail-row pf-detail-pl">
+                      <span className="pf-detail-label">평가손익</span>
+                      <span className={`pf-detail-value pf-${hPlClass}`}>
+                        {hPlSign}${Math.abs(h.profitLoss || 0).toLocaleString()} ({hPlSign}{h.profitLossPct || 0}%)
+                      </span>
+                    </div>
+                    {h.weight != null && (
+                      <div className="pf-detail-row">
+                        <span className="pf-detail-label">비중</span>
+                        <span className="pf-detail-value">{h.weight}%</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 7팩터 스코어 미니바 */}
+                  {h.status?.scores && (
+                    <div className="pf-scores-mini">
+                      {Object.entries(h.status.scores).map(([key, val]) => {
+                        if (val == null) return null
+                        const labelMap = { trend: '추세', momentum: '모멘텀', financial: '재무', valuation: '밸류', sentiment: '심리', volatility: '변동성', reliability: '신뢰도' }
+                        const barClass = val >= 60 ? 'high' : val >= 40 ? 'mid' : 'low'
+                        return (
+                          <div key={key} className="pf-score-bar-row">
+                            <span className="pf-score-label">{labelMap[key] || key}</span>
+                            <div className="pf-score-bar-bg">
+                              <div className={`pf-score-bar-fill pf-bar-${barClass}`} style={{ width: `${val}%` }} />
+                            </div>
+                            <span className="pf-score-val">{val}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* 전략 문구 */}
+                  {h.status?.strategy && (
+                    <div className="pf-strategy">{h.status.strategy}</div>
+                  )}
+
+                  {/* 이유 태그 */}
+                  {h.status?.reasons?.length > 0 && (
+                    <div className="pf-reasons">
+                      {h.status.reasons.map((r, i) => (
+                        <span key={i} className="pf-reason-tag">{r}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 메모 */}
+                  {h.memo && <div className="pf-memo">📝 {h.memo}</div>}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* 빈 상태 */}
+      {!loading && holdings.length === 0 && !error && (
+        <div className="empty-state">
+          <span className="big-emoji">💼</span>
+          <p>보유종목이 없습니다.<br />아래 버튼을 눌러 종목을 추가하세요.</p>
+        </div>
+      )}
+
+      {/* FAB 종목 추가 버튼 */}
+      <button className="pf-fab" onClick={openAddModal}>＋ 종목 추가</button>
+
+      {/* ── 종목 추가/수정 모달 ── */}
+      {showAddModal && (
+        <div className="pf-modal-overlay" onClick={closeModal}>
+          <div className="pf-modal" onClick={e => e.stopPropagation()}>
+            <div className="pf-modal-header">
+              <span>{editingHolding ? '종목 수정' : '종목 추가'}</span>
+              <button className="pf-modal-close" onClick={closeModal}>✕</button>
+            </div>
+            <div className="pf-modal-body">
+              <label className="pf-form-label">
+                티커 *
+                <input
+                  className="pf-form-input"
+                  placeholder="예: AAPL, NVDA"
+                  value={formTicker}
+                  onChange={e => setFormTicker(e.target.value)}
+                  disabled={!!editingHolding}
+                />
+              </label>
+              <label className="pf-form-label">
+                종목명
+                <input
+                  className="pf-form-input"
+                  placeholder="예: Apple Inc."
+                  value={formName}
+                  onChange={e => setFormName(e.target.value)}
+                />
+              </label>
+              <div className="pf-form-row">
+                <label className="pf-form-label pf-form-half">
+                  수량 *
+                  <input
+                    className="pf-form-input"
+                    type="number"
+                    placeholder="10"
+                    value={formQty}
+                    onChange={e => setFormQty(e.target.value)}
+                  />
+                </label>
+                <label className="pf-form-label pf-form-half">
+                  평균단가($) *
+                  <input
+                    className="pf-form-input"
+                    type="number"
+                    step="0.01"
+                    placeholder="150.00"
+                    value={formPrice}
+                    onChange={e => setFormPrice(e.target.value)}
+                  />
+                </label>
+              </div>
+              <label className="pf-form-label">
+                메모
+                <input
+                  className="pf-form-input"
+                  placeholder="나만의 메모 (선택)"
+                  value={formMemo}
+                  onChange={e => setFormMemo(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="pf-modal-footer">
+              <button className="pf-modal-cancel" onClick={closeModal}>취소</button>
+              <button
+                className="pf-modal-submit"
+                onClick={editingHolding ? handleUpdate : handleAdd}
+                disabled={!editingHolding && (!formTicker || !formQty || !formPrice)}
+              >
+                {editingHolding ? '수정' : '추가'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── 루트 App ─────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState('watchlist') // 'watchlist' | 'chat'
+  const [page, setPage] = useState('watchlist') // 'watchlist' | 'chat' | 'portfolio'
   const [chatId, setChatId] = useState(() => localStorage.getItem('yeri_chatId') || '')
   const [alertCount, setAlertCount] = useState(0)
 
@@ -434,6 +907,9 @@ export default function App() {
         <nav className="topbar-nav">
           <button className={page === 'watchlist' ? 'active' : ''} onClick={() => setPage('watchlist')}>
             관심종목
+          </button>
+          <button className={page === 'portfolio' ? 'active' : ''} onClick={() => setPage('portfolio')}>
+            포트폴리오
           </button>
           <button className={page === 'chat' ? 'active' : ''} onClick={() => setPage('chat')}>
             채팅 분석
@@ -455,6 +931,7 @@ export default function App() {
       {page === 'watchlist' && (
         <WatchlistPage chatId={chatId} onBadgeCountChange={setAlertCount} />
       )}
+      {page === 'portfolio' && <PortfolioPage userId={chatId} />}
       {page === 'chat' && <ChatPage chatId={chatId} />}
     </div>
   )

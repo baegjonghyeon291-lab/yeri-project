@@ -63,6 +63,8 @@ const { buildPerformanceReport } = require('./services/recommendation-tracker');
 const { generateRecommendations } = require('./services/recommendation-engine');
 const sessions = require('./services/session');
 const watchlistStore = require('./services/watchlist-store');
+const portfolioStore = require('./services/portfolio-store');
+const { analyzeHolding, buildPortfolioSummary } = require('./services/portfolio-analyzer');
 const userSettings = require('./services/user-settings');
 const { scanWatchlist, invalidateCache } = require('./services/alert-engine');
 
@@ -705,23 +707,279 @@ app.get('/api/briefing/market', async (req, res) => {
 app.get('/api/briefing/:userId', async (req, res) => {
     try {
         const list = watchlistStore.get(req.params.userId);
-        if (!list.length) return res.json({ report: '', list: [] });
+        if (!list.length) return res.json({ empty: true, report: '', list: [], message: '관심종목이 없습니다. 관심종목 페이지에서 종목을 먼저 추가해주세요.' });
         const report = await generateWatchlistBriefing(list);
         res.json({ report, list });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ error: `브리핑 생성 실패: ${err.message}` });
     }
 });
 
-// ── 포트폴리오 분석 ───────────────────────────────────────────────
+// ── 포트폴리오 관리 (자산관리) ─────────────────────────────────────
+
+// 기존 1회성 분석 (하위호환 유지)
 app.post('/api/portfolio/analyze', async (req, res) => {
-    const { items } = req.body; // [{ name, ticker, weight }]
+    const { items } = req.body;
     if (!items || items.length < 2) return res.status(400).json({ error: 'items (min 2) required' });
     try {
         const report = await analyzePortfolio(items, false, 'normal');
         res.json({ report });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/portfolio/:userId — 포트폴리오 조회 (실시간 가격 + 수익률 + 상태판단)
+app.get('/api/portfolio/:userId', async (req, res) => {
+    try {
+        const holdings = portfolioStore.get(req.params.userId);
+        if (!holdings.length) {
+            return res.json({
+                holdings: [],
+                summary: { holdingCount: 0, totalInvested: 0, totalValue: 0, totalProfitLoss: 0, totalProfitLossPct: 0 },
+                portfolioStatus: { bullishCount: 0, normalCount: 0, cautionCount: 0, warningCount: 0, riskTop3: [], strongTop3: [], needCheckTop3: [] },
+                message: '보유종목이 없습니다. 종목을 추가해주세요.'
+            });
+        }
+
+        const enriched = [];
+        for (const h of holdings) {
+            let stockData = null, currentPrice = null, changePct = null;
+            try {
+                stockData = await fetchAllStockData(h.ticker, h.name);
+                currentPrice = stockData.price?.current ?? null;
+                changePct = stockData.price?.changePct ?? null;
+            } catch (e) {
+                console.error(`[Portfolio] ${h.ticker} 데이터 조회 실패:`, e.message);
+            }
+
+            const investedAmount = h.quantity * h.avgPrice;
+            const currentValue = currentPrice != null ? h.quantity * currentPrice : null;
+            const profitLoss = currentValue != null ? currentValue - investedAmount : null;
+            const profitLossPct = investedAmount > 0 && profitLoss != null
+                ? Math.round((profitLoss / investedAmount) * 10000) / 100
+                : null;
+
+            // 7팩터 상태 판단
+            let status = null;
+            if (stockData) {
+                status = analyzeHolding(stockData, h);
+            }
+
+            enriched.push({
+                ticker: h.ticker,
+                name: h.name,
+                quantity: h.quantity,
+                avgPrice: h.avgPrice,
+                buyDate: h.buyDate || null,
+                memo: h.memo || null,
+                currentPrice,
+                changePct,
+                investedAmount: Math.round(investedAmount * 100) / 100,
+                currentValue: currentValue != null ? Math.round(currentValue * 100) / 100 : null,
+                profitLoss: profitLoss != null ? Math.round(profitLoss * 100) / 100 : null,
+                profitLossPct,
+                status,
+                dataAsOf: new Date().toISOString(),
+            });
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        // 전체 요약
+        const totalInvested = enriched.reduce((s, h) => s + h.investedAmount, 0);
+        const totalValue = enriched.reduce((s, h) => s + (h.currentValue || h.investedAmount), 0);
+        const totalPL = totalValue - totalInvested;
+
+        enriched.forEach(h => {
+            h.weight = totalValue > 0 && h.currentValue != null
+                ? Math.round((h.currentValue / totalValue) * 10000) / 100
+                : null;
+        });
+
+        // 포트폴리오 전체 상태 요약
+        const portfolioStatus = buildPortfolioSummary(enriched);
+
+        res.json({
+            holdings: enriched,
+            summary: {
+                holdingCount: enriched.length,
+                totalInvested: Math.round(totalInvested * 100) / 100,
+                totalValue: Math.round(totalValue * 100) / 100,
+                totalProfitLoss: Math.round(totalPL * 100) / 100,
+                totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
+            },
+            portfolioStatus,
+        });
+    } catch (err) {
+        console.error('[Portfolio GET]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/portfolio/:userId/add — 종목 추가
+app.post('/api/portfolio/:userId/add', (req, res) => {
+    const { ticker, name, quantity, avgPrice, buyDate, memo } = req.body;
+    if (!ticker || !quantity || !avgPrice) {
+        return res.status(400).json({ error: 'ticker, quantity, avgPrice are required' });
+    }
+    const result = portfolioStore.add(req.params.userId, {
+        ticker, name: name || ticker.toUpperCase(), quantity, avgPrice, buyDate, memo
+    });
+    res.json({
+        result,
+        holdings: portfolioStore.get(req.params.userId),
+        summary: portfolioStore.getSummary(req.params.userId)
+    });
+});
+
+// POST /api/portfolio/:userId/update — 수량/평단가 수정
+app.post('/api/portfolio/:userId/update', (req, res) => {
+    const { ticker, quantity, avgPrice, name } = req.body;
+    if (!ticker) return res.status(400).json({ error: 'ticker is required' });
+    const result = portfolioStore.update(req.params.userId, ticker, { quantity, avgPrice, name });
+    if (!result) return res.status(404).json({ error: `${ticker} not found in portfolio` });
+    res.json({
+        result: 'updated',
+        holdings: portfolioStore.get(req.params.userId),
+        summary: portfolioStore.getSummary(req.params.userId)
+    });
+});
+
+// POST /api/portfolio/:userId/remove — 종목 삭제
+app.post('/api/portfolio/:userId/remove', (req, res) => {
+    const { ticker } = req.body;
+    if (!ticker) return res.status(400).json({ error: 'ticker is required' });
+    const result = portfolioStore.remove(req.params.userId, ticker);
+    res.json({
+        result: result ? 'removed' : 'not_found',
+        holdings: portfolioStore.get(req.params.userId),
+        summary: portfolioStore.getSummary(req.params.userId)
+    });
+});
+
+// GET /api/portfolio/:userId/briefing — GPT 포트폴리오 브리핑
+app.get('/api/portfolio/:userId/briefing', async (req, res) => {
+    try {
+        const holdings = portfolioStore.get(req.params.userId);
+        if (!holdings.length) {
+            return res.json({ empty: true, report: '', message: '보유종목이 없습니다. 종목을 먼저 추가해주세요.' });
+        }
+
+        // 실시간 데이터 수집 (순차)
+        const enriched = [];
+        for (const h of holdings) {
+            try {
+                const data = await fetchAllStockData(h.ticker, h.name);
+                const currentPrice = data.price?.current ?? null;
+                const investedAmount = h.quantity * h.avgPrice;
+                const currentValue = currentPrice != null ? h.quantity * currentPrice : null;
+                const profitLoss = currentValue != null ? currentValue - investedAmount : null;
+                const profitLossPct = investedAmount > 0 && profitLoss != null
+                    ? ((profitLoss / investedAmount) * 100).toFixed(2)
+                    : '0';
+
+                enriched.push({
+                    ...h,
+                    currentPrice,
+                    changePct: data.price?.changePct ?? null,
+                    investedAmount,
+                    currentValue,
+                    profitLoss,
+                    profitLossPct,
+                    rsi: data.technical?.rsi ?? null,
+                    ema20: data.technical?.ema20 ?? null,
+                    newsCount: (data.news || []).length,
+                    topNews: (data.news || []).slice(0, 2).map(n => n.title),
+                });
+            } catch (e) {
+                enriched.push({ ...h, currentPrice: null, error: e.message });
+            }
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        const totalInvested = enriched.reduce((s, h) => s + (h.investedAmount || 0), 0);
+        const totalValue = enriched.reduce((s, h) => s + (h.currentValue || h.investedAmount || 0), 0);
+        const totalPL = totalValue - totalInvested;
+        const totalPLPct = totalInvested > 0 ? ((totalPL / totalInvested) * 100).toFixed(2) : '0';
+
+        const today = new Date().toLocaleDateString('ko-KR');
+        const currency = '$';
+
+        const holdingLines = enriched.map(h => {
+            const cur = h.currentPrice != null ? `${currency}${Number(h.currentPrice).toLocaleString()}` : '가격 미확인';
+            const plSign = h.profitLoss > 0 ? '+' : '';
+            return [
+                `[${h.name} (${h.ticker})]`,
+                `보유: ${h.quantity}주 | 평단가: ${currency}${h.avgPrice} | 현재가: ${cur}`,
+                `투자금: ${currency}${Math.round(h.investedAmount).toLocaleString()} | 평가액: ${h.currentValue != null ? currency + Math.round(h.currentValue).toLocaleString() : '미확인'}`,
+                `수익률: ${plSign}${h.profitLossPct}% (${plSign}${currency}${h.profitLoss != null ? Math.round(h.profitLoss).toLocaleString() : '미확인'})`,
+                h.rsi != null ? `RSI(14): ${Number(h.rsi).toFixed(1)}` : '',
+                h.topNews?.length ? `최근뉴스: ${h.topNews.join(' / ')}` : '최근뉴스: 없음',
+            ].filter(Boolean).join('\n');
+        }).join('\n\n---\n\n');
+
+        const prompt = `다음은 ${today} 기준 사용자의 실제 보유 포트폴리오 데이터야.
+
+[포트폴리오 전체 요약]
+총 투자금: ${currency}${Math.round(totalInvested).toLocaleString()}
+총 평가액: ${currency}${Math.round(totalValue).toLocaleString()}
+총 수익률: ${totalPL >= 0 ? '+' : ''}${totalPLPct}% (${totalPL >= 0 ? '+' : ''}${currency}${Math.round(totalPL).toLocaleString()})
+보유 종목 수: ${enriched.length}개
+
+[보유 종목 상세]
+${holdingLines}
+
+위 실데이터를 기반으로 포트폴리오 자산관리 브리핑을 작성해줘.
+
+━━━━━━━━━━━━━━━━━━━━━━
+[반드시 포함할 섹션]
+
+💰 포트폴리오 총괄
+전체 수익률, 총 평가액, 주요 성과를 2~3줄로 요약.
+
+📊 종목별 현황
+각 종목의 수익률과 현재 상태(기술적 위치)를 간결하게. 수익 TOP/손실 TOP 부각.
+
+⚖️ 자산 배분 분석
+섹터/지역 집중도, 분산 정도 평가. 특정 섹터 과집중 시 경고.
+
+⚠️ 리스크 포인트
+전체 포트폴리오 관점에서 주의할 리스크 2~3가지.
+
+🔄 리밸런싱 제안
+비중 조정이 필요한 종목, 추가 매수/매도 고려 종목 구체적 제안.
+
+💡 한줄 결론
+오늘 포트폴리오 전체에 대한 한줄 판단 + 액션
+"예리가 응원해요, 현명한 자산관리 하세요 ♡"
+
+━━━━━━━━━━━━━━━━━━━━━━
+[절대 금지]
+- 데이터에 없는 수치를 만들어내는 것
+- 수치 없는 항목은 "데이터 부족" 명시
+- "몰빵", "올인" 등 과장 표현`;
+
+        const client = require('./services/openai-client');
+        const MODEL = process.env.OPENAI_MODEL_DEFAULT || 'gpt-4.1';
+        const response = await client.chat.completions.create({
+            model: MODEL,
+            messages: [
+                {
+                    role: 'system',
+                    content: '너는 "예리"라는 AI 자산관리 비서야. 사용자의 실제 보유 포트폴리오를 분석해서 자산관리 브리핑을 해. 데이터가 없으면 절대 수치를 만들어내지 마. 간결하고 핵심만.'
+                },
+                { role: 'user', content: prompt }
+            ],
+            max_tokens: 3000,
+        });
+
+        const report = response.choices[0].message.content;
+        console.log(`[Portfolio Briefing] 완료 (finish: ${response.choices[0].finish_reason}, tokens: ${response.usage?.completion_tokens || '?'})`);
+
+        res.json({ report, holdings: enriched, summary: { totalInvested, totalValue, totalProfitLoss: totalPL, totalProfitLossPct: totalPLPct } });
+    } catch (err) {
+        console.error('[Portfolio Briefing]', err.message);
+        res.status(500).json({ error: `포트폴리오 브리핑 실패: ${err.message}` });
     }
 });
 
