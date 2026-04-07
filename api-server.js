@@ -877,6 +877,14 @@ app.get('/api/portfolio/:userId', async (req, res) => {
         // 포트폴리오 로드 시 사용자 조건 기반 알림을 평가하여 DB에 자동 적재
         evaluatePortfolioAlerts(req.params.userId, snap.holdings);
         
+        // 포트폴리오 로드 시 자동으로 히스토리 스냅샷 저장
+        portfolioStore.saveSnapshot(req.params.userId, {
+            totalValue: snap.summary.totalValue,
+            totalProfitLoss: snap.summary.totalProfitLoss,
+            totalProfitLossPct: snap.summary.totalProfitLossPct,
+            healthScore: snap.healthScore.score
+        });
+
         res.json(snap);
     } catch (err) {
         console.error('[Portfolio GET]', err.message);
@@ -960,7 +968,58 @@ app.post('/api/portfolio/:userId/snapshot', (req, res) => {
 // GET /api/portfolio/:userId/history — 히스토리 조회
 app.get('/api/portfolio/:userId/history', (req, res) => {
     const history = portfolioStore.getHistory(req.params.userId);
-    res.json({ history });
+    if (!history || history.length === 0) {
+        return res.json({ history: [], comparison: null });
+    }
+
+    const latest = history[history.length - 1];
+    const now = new Date();
+    
+    const findSnapshot = (daysAgo) => {
+        const targetTime = now.getTime() - (daysAgo * 24 * 60 * 60 * 1000);
+        let best = null;
+        let minDiff = Infinity;
+        for (let i = history.length - 1; i >= 0; i--) {
+            const h = history[i];
+            const hTime = new Date(h.date).getTime();
+            if (hTime <= targetTime) {
+                const diff = targetTime - hTime;
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    best = h;
+                }
+            }
+        }
+        return best;
+    };
+
+    const makeDelta = (oldSn) => {
+        if (!oldSn) return null;
+        const diff = latest.totalValue - oldSn.totalValue;
+        return {
+            date: oldSn.date,
+            value: oldSn.totalValue,
+            diff,
+            diffPct: oldSn.totalValue > 0 ? (diff / oldSn.totalValue * 100) : 0
+        };
+    };
+
+    const comparison = {
+        current: latest.totalValue,
+        yesterday: makeDelta(findSnapshot(1)),
+        lastWeek: makeDelta(findSnapshot(7)),
+        lastMonth: makeDelta(findSnapshot(30))
+    };
+
+    // 가장 높은 가치와 가장 낮았던 가치 (최근 30일 이내)
+    const last30Days = history.filter(h => (now.getTime() - new Date(h.date).getTime()) <= 30 * 24 * 60 * 60 * 1000);
+    if (last30Days.length > 0) {
+        const values = last30Days.map(h => h.totalValue);
+        comparison.max30 = Math.max(...values);
+        comparison.min30 = Math.min(...values);
+    }
+
+    res.json({ history, comparison });
 });
 
 // GET /api/portfolio/:userId/briefing — GPT 포트폴리오 브리핑
