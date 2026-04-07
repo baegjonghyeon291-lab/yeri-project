@@ -532,6 +532,7 @@ function PortfolioPage({ userId }) {
       })
       closeModal()
       fetchPortfolio()
+      alert('✅ 종목 등록이 성공적으로 완료되었습니다.')
     } catch (e) { setError(e.message) }
   }
 
@@ -556,6 +557,7 @@ function PortfolioPage({ userId }) {
       })
       closeModal()
       fetchPortfolio()
+      alert('✅ 포트폴리오 종목 업데이트(수정)가 반영되었습니다.')
     } catch (e) { setError(e.message) }
   }
 
@@ -570,6 +572,7 @@ function PortfolioPage({ userId }) {
       })
       setMenuOpen(null)
       fetchPortfolio()
+      alert('✅ 해당 종목이 포트폴리오에서 삭제되었습니다.')
     } catch (e) { setError(e.message) }
   }
 
@@ -1074,24 +1077,21 @@ export default function App() {
   const [chatId, setChatId] = useState(() => localStorage.getItem('yeri_chatId') || '')
   const [alertCount, setAlertCount] = useState(0)
   
-  // 앱 (원격) 업데이트 감지 상태
-  const [updateAvailable, setUpdateAvailable] = useState(false)
-
-  // 배포 버전 주기적 확인 (15초 간격)
-  useEffect(() => {
-    if (BUILD_HASH === 'dev') return // 로컬 환경은 제외
-    const checkVersion = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/version`)
-        const data = await res.json()
-        if (data.commitHash && data.commitHash !== 'unknown' && data.commitHash !== BUILD_HASH) {
-          setUpdateAvailable(true)
-        }
-      } catch (e) { /* ignore */ }
+  // 앱 (원격) 업데이트 수동 확인 기능
+  async function handleCheckUpdate() {
+    try {
+      const res = await fetch(`${API_BASE}/version`)
+      const data = await res.json()
+      if (data.commitHash && data.commitHash !== 'unknown' && data.commitHash !== BUILD_HASH) {
+        alert('🚀 새로운 업데이트 버전이 발견되었습니다!\n확인을 누르시면 최신 버전으로 새로고침됩니다.')
+        window.location.reload(true)
+      } else {
+        alert('✅ 이미 최신 버전이 성공적으로 반영되어 있습니다!\n(정상적으로 업데이트가 완료된 상태입니다)')
+      }
+    } catch (e) {
+      alert('⚠️ 서버와 연결을 확인할 수 없습니다. 잠시 후 다시 시도해주세요.')
     }
-    const interval = setInterval(checkVersion, 15000)
-    return () => clearInterval(interval)
-  }, [])
+  }
 
   function handleChatIdChange(v) {
     setChatId(v)
@@ -1102,7 +1102,13 @@ export default function App() {
     <div className="app">
       {/* 탑바 */}
       <header className="topbar">
-        <span className="topbar-logo">예리 v3 💛 <span className="build-tag">build:{BUILD_HASH}</span></span>
+        <span className="topbar-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          예리 v3 💛 
+          <span className="build-tag">build:{BUILD_HASH}</span>
+          <button className="manual-update-btn" onClick={handleCheckUpdate} style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'var(--blue)', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+            🔄 업데이트 확인
+          </button>
+        </span>
         <nav className="topbar-nav">
           <button className={page === 'watchlist' ? 'active' : ''} onClick={() => setPage('watchlist')}>
             관심종목
@@ -1125,13 +1131,6 @@ export default function App() {
           />
         </div>
       </header>
-
-      {/* 새 버전 업데이트 배너 */}
-      {updateAvailable && (
-        <div className="update-banner" onClick={() => window.location.reload(true)}>
-          🚀 새로운 버전의 예리가 배포되었습니다. 화면을 눌러 새로고침 하세요!
-        </div>
-      )}
 
       {/* 페이지 */}
       {page === 'watchlist' && (
