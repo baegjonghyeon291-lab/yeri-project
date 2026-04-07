@@ -420,6 +420,13 @@ function PortfolioPage({ userId }) {
   const [holdings, setHoldings] = useState([])
   const [summary, setSummary] = useState(null)
   const [portfolioStatus, setPortfolioStatus] = useState(null)
+  
+  // 신규 메타데이터
+  const [allocations, setAllocations] = useState(null)
+  const [healthScore, setHealthScore] = useState(null)
+  const [rebalancing, setRebalancing] = useState(null)
+  const [dailyBriefing, setDailyBriefing] = useState(null)
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -434,12 +441,24 @@ function PortfolioPage({ userId }) {
   const [briefingLoading, setBriefingLoading] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
 
+  // 탭 상태 (요약 vs 리스트 vs 캘린더 vs 히스토리)
+  const [activeTab, setActiveTab] = useState('summary') // 'summary', 'list'
+
+  // 시나리오 상태 { ticker: { targetPrice: '', addQty: '', addPrice: '' } }
+  const [scenarios, setScenarios] = useState({})
+
   // 폼 state
   const [formTicker, setFormTicker] = useState('')
   const [formName, setFormName] = useState('')
   const [formQty, setFormQty] = useState('')
   const [formPrice, setFormPrice] = useState('')
   const [formMemo, setFormMemo] = useState('')
+  
+  // 매매일지 추가 폼
+  const [formTradeReason, setFormTradeReason] = useState('')
+  const [formTargetPrice, setFormTargetPrice] = useState('')
+  const [formLossPrice, setFormLossPrice] = useState('')
+  const [formViewTerm, setFormViewTerm] = useState('단기')
 
   const fetchPortfolio = useCallback(async () => {
     if (!userId) return
@@ -452,6 +471,10 @@ function PortfolioPage({ userId }) {
       setHoldings(data.holdings || [])
       setSummary(data.summary || null)
       setPortfolioStatus(data.portfolioStatus || null)
+      setAllocations(data.allocations || null)
+      setHealthScore(data.healthScore || null)
+      setRebalancing(data.rebalancing || null)
+      setDailyBriefing(data.dailyBriefing || null)
       setLastUpdated(Date.now())
     } catch (e) {
       setError(e.message)
@@ -475,6 +498,10 @@ function PortfolioPage({ userId }) {
           quantity: Number(formQty),
           avgPrice: Number(formPrice),
           memo: formMemo || null,
+          tradeReason: formTradeReason || null,
+          targetPrice: formTargetPrice,
+          lossPrice: formLossPrice,
+          viewTerm: formViewTerm
         })
       })
       closeModal()
@@ -494,6 +521,11 @@ function PortfolioPage({ userId }) {
           name: formName || undefined,
           quantity: formQty ? Number(formQty) : undefined,
           avgPrice: formPrice ? Number(formPrice) : undefined,
+          memo: formMemo || null,
+          tradeReason: formTradeReason || null,
+          targetPrice: formTargetPrice,
+          lossPrice: formLossPrice,
+          viewTerm: formViewTerm
         })
       })
       closeModal()
@@ -534,12 +566,14 @@ function PortfolioPage({ userId }) {
   function openAddModal() {
     setEditingHolding(null)
     setFormTicker(''); setFormName(''); setFormQty(''); setFormPrice(''); setFormMemo('')
+    setFormTradeReason(''); setFormTargetPrice(''); setFormLossPrice(''); setFormViewTerm('단기')
     setShowAddModal(true)
   }
 
   function openEditModal(h) {
     setEditingHolding(h)
     setFormTicker(h.ticker); setFormName(h.name); setFormQty(String(h.quantity)); setFormPrice(String(h.avgPrice)); setFormMemo(h.memo || '')
+    setFormTradeReason(h.tradeReason || ''); setFormTargetPrice(h.targetPrice || ''); setFormLossPrice(h.lossPrice || ''); setFormViewTerm(h.viewTerm || '단기')
     setShowAddModal(true)
     setMenuOpen(null)
   }
@@ -547,7 +581,21 @@ function PortfolioPage({ userId }) {
   function closeModal() {
     setShowAddModal(false)
     setEditingHolding(null)
-    setFormTicker(''); setFormName(''); setFormQty(''); setFormPrice(''); setFormMemo('')
+  }
+
+  // 시나리오 상태 제어
+  function toggleScenario(ticker) {
+    setScenarios(prev => ({
+      ...prev,
+      [ticker]: prev[ticker] ? undefined : { targetPrice: '', addQty: '', addPrice: '' }
+    }))
+  }
+
+  function updateScenario(ticker, field, value) {
+    setScenarios(prev => ({
+      ...prev,
+      [ticker]: { ...prev[ticker], [field]: value }
+    }))
   }
 
   // 외부 클릭으로 메뉴 닫기
@@ -573,16 +621,25 @@ function PortfolioPage({ userId }) {
   const plSign = summary?.totalProfitLoss >= 0 ? '+' : ''
 
   return (
-    <div className="main">
-      {/* 섹션 헤더 */}
+    <div className="main pf-page-wrapper">
+      {/* 한줄 요약 위젯 */}
+      {dailyBriefing && dailyBriefing.widget && (
+        <div className="pf-oneliner-widget">
+          📌 {dailyBriefing.widget}
+        </div>
+      )}
+
+      {/* 섹션 헤더 & 탭 */}
       <div className="section-header">
         <span className="section-title">💼 내 포트폴리오</span>
-        <span className="section-sub">
-          {lastUpdated ? `${timeAgo(lastUpdated)} 갱신` : ''}
-        </span>
         <button className="refresh-btn" onClick={fetchPortfolio} disabled={loading}>
           {loading ? '로딩 중...' : '새로고침'}
         </button>
+      </div>
+
+      <div className="pf-tabs">
+        <button className={activeTab === 'summary' ? 'active' : ''} onClick={() => setActiveTab('summary')}>요약/분석</button>
+        <button className={activeTab === 'list' ? 'active' : ''} onClick={() => setActiveTab('list')}>보유 종목</button>
       </div>
 
       {error && <div className="error-bar">⚠️ {error}</div>}
@@ -590,18 +647,47 @@ function PortfolioPage({ userId }) {
       {loading && !holdings.length && (
         <div className="loading-wrap">
           <div className="spinner" />
-          <span>포트폴리오 분석 중... (종목당 수초 소요)</span>
+          <span>포트폴리오 분석 중...</span>
         </div>
       )}
 
-      {/* ── 전체 요약 카드 ── */}
-      {summary && summary.holdingCount > 0 && (
-        <div className="pf-summary-card">
-          <div className="pf-summary-header">
-            <div className="pf-summary-title">포트폴리오 요약</div>
-            <div className="pf-summary-count">{summary.holdingCount}종목</div>
-          </div>
+      {/* =======================================================
+                            요약/분석 탭 
+      ======================================================= */}
+      {activeTab === 'summary' && summary && summary.holdingCount > 0 && (
+        <div className="pf-tab-content">
+          {/* 건강도 점수 카드 */}
+          {healthScore && (
+            <div className="pf-health-card">
+              <div className="pf-health-header">
+                <div>
+                  <div className="pf-health-title">포트폴리오 건강도</div>
+                  <div className={`pf-health-label pf-health-${healthScore.label}`}>{healthScore.label} ({healthScore.score}점)</div>
+                </div>
+                <div className="pf-health-circle">
+                  <svg viewBox="0 0 36 36" className="circular-chart">
+                    <path className="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    <path className={`circle stroke-${healthScore.label}`} strokeDasharray={`${healthScore.score}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    <text x="18" y="20.35" className="percentage">{healthScore.score}</text>
+                  </svg>
+                </div>
+              </div>
+              <div className="pf-health-details">
+                {healthScore.strengths?.length > 0 && (
+                  <div className="pf-health-good">
+                    <strong>강점:</strong> {healthScore.strengths.join(', ')}
+                  </div>
+                )}
+                {healthScore.weaknesses?.length > 0 && (
+                  <div className="pf-health-bad">
+                    <strong>약점:</strong> {healthScore.weaknesses.join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
+          {/* 기존 요약 그리드 */}
           <div className="pf-summary-grid">
             <div className="pf-summary-item">
               <div className="pf-summary-label">총 투자금</div>
@@ -620,183 +706,231 @@ function PortfolioPage({ userId }) {
             </div>
           </div>
 
-          {/* 상태 배지 카운트 */}
-          {portfolioStatus && (
-            <div className="pf-badge-counts">
-              {portfolioStatus.bullishCount > 0 && <span className="pf-badge-tag pf-badge-bullish">📈 상승우세 {portfolioStatus.bullishCount}</span>}
-              {portfolioStatus.normalCount > 0 && <span className="pf-badge-tag pf-badge-normal">➡️ 보통 {portfolioStatus.normalCount}</span>}
-              {portfolioStatus.cautionCount > 0 && <span className="pf-badge-tag pf-badge-caution">⚠️ 주의 {portfolioStatus.cautionCount}</span>}
-              {portfolioStatus.warningCount > 0 && <span className="pf-badge-tag pf-badge-warning">🚨 경고 {portfolioStatus.warningCount}</span>}
+          {/* 일일 브리핑 텍스트 뷰 */}
+          {dailyBriefing && (
+            <div className="pf-daily-briefing">
+              <pre>{dailyBriefing.text}</pre>
+              <button className="pf-briefing-btn" onClick={fetchBriefing} disabled={briefingLoading}>
+                {briefingLoading ? '⏳ GPT 심층 브리핑 생성 중...' : '📋 GPT 심층 브리핑 보기'}
+              </button>
             </div>
           )}
 
-          {/* TOP3 그리드 */}
+          {/* GPT 브리핑 화면 */}
+          {showBriefing && briefingReport && (
+            <div className="pf-briefing-card">
+              <div className="pf-briefing-header">
+                <span className="pf-briefing-title">📋 GPT 심층 브리핑</span>
+                <button className="pf-briefing-close" onClick={() => setShowBriefing(false)}>✕</button>
+              </div>
+              <div className="pf-briefing-body">{briefingReport}</div>
+            </div>
+          )}
+
+          {/* 비중 분석 & 리밸런싱 */}
+          {allocations && (
+            <div className="pf-allocation-card">
+              <div className="pf-alloc-title">📊 종목 비중 분석</div>
+              <div className="pf-alloc-bars">
+                {allocations.details?.slice(0, 5).map(a => (
+                  <div key={a.ticker} className="pf-alloc-row">
+                    <span className="pf-alloc-label">{a.ticker}</span>
+                    <div className="pf-alloc-bar-bg">
+                      <div className="pf-alloc-bar-fill" style={{ width: `${a.weight}%`, background: a.weight >= 30 ? 'var(--red)' : 'var(--gold)' }} />
+                    </div>
+                    <span className="pf-alloc-val">{a.weight}%</span>
+                  </div>
+                ))}
+              </div>
+              {rebalancing && rebalancing.length > 0 && (
+                <div className="pf-rebalance-box">
+                  <div className="pf-rebalance-title">💡 리밸런싱 제안</div>
+                  <ul>{rebalancing.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TOP 3 기회/위험 종목 */}
           {portfolioStatus && (
             <div className="pf-top3-wrap">
               {portfolioStatus.strongTop3?.length > 0 && (
                 <div className="pf-top3-section">
-                  <div className="pf-top3-label">💪 강세 TOP</div>
+                  <div className="pf-top3-label">🎯 강세 종목 TOP</div>
                   {portfolioStatus.strongTop3.map(s => (
                     <div key={s.ticker} className="pf-top3-item pf-top3-strong">
                       <span className="pf-top3-ticker">{s.ticker}</span>
                       <span className="pf-top3-name">{s.name}</span>
-                      <span className="pf-top3-score">{s.score}점</span>
+                      <span className="pf-top3-badge">{s.badge}</span>
                     </div>
                   ))}
                 </div>
               )}
               {portfolioStatus.riskTop3?.length > 0 && (
                 <div className="pf-top3-section">
-                  <div className="pf-top3-label">⚠️ 리스크 TOP</div>
+                  <div className="pf-top3-label">⚠️ 리스크 종목 TOP</div>
                   {portfolioStatus.riskTop3.map(s => (
                     <div key={s.ticker} className="pf-top3-item pf-top3-risk">
                       <span className="pf-top3-ticker">{s.ticker}</span>
                       <span className="pf-top3-name">{s.name}</span>
-                      <span className="pf-top3-score">{s.score}점</span>
+                      <span className="pf-top3-badge">{s.badge}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
           )}
-
-          {/* 브리핑 버튼 */}
-          <button className="pf-briefing-btn" onClick={fetchBriefing} disabled={briefingLoading}>
-            {briefingLoading ? '⏳ 브리핑 생성 중...' : '📋 AI 포트폴리오 브리핑'}
-          </button>
         </div>
       )}
 
-      {/* ── 브리핑 화면 ── */}
-      {showBriefing && briefingReport && (
-        <div className="pf-briefing-card">
-          <div className="pf-briefing-header">
-            <span className="pf-briefing-title">📋 AI 포트폴리오 브리핑</span>
-            <button className="pf-briefing-close" onClick={() => setShowBriefing(false)}>✕</button>
-          </div>
-          <div className="pf-briefing-body">{briefingReport}</div>
-        </div>
-      )}
+      {/* =======================================================
+                            보유 종목 리스트 탭
+      ======================================================= */}
+      {activeTab === 'list' && holdings.length > 0 && (
+        <div className="pf-holdings-grid pf-mt-4">
+          {holdings.map(h => {
+            const hPlClass = (h.profitLossPct || 0) >= 0 ? 'up' : 'down'
+            const hPlSign = (h.profitLossPct || 0) >= 0 ? '+' : ''
+            const badge = h.status?.badge || '보통'
+            const emoji = h.status?.emoji || '➡️'
+            const badgeClass = badge === '상승우세' ? 'bullish' : badge === '주의' ? 'caution' : badge === '경고' ? 'warning' : 'normal'
+            
+            // 시나리오 시뮬
+            const scen = scenarios[h.ticker]
+            let simMsg = null
+            if (scen) {
+                const addQty = Number(scen.addQty)||0;
+                const addPrice = Number(scen.addPrice)||0;
+                const tgt = Number(scen.targetPrice)||0;
+                let newQty = h.quantity + addQty;
+                let newAvg = newQty > 0 ? ((h.quantity * h.avgPrice) + (addQty * addPrice)) / newQty : h.avgPrice;
+                if (tgt > 0 && newAvg > 0) {
+                    const simProfit = (tgt - newAvg) * newQty;
+                    const simPct = ((tgt / newAvg) - 1) * 100;
+                    simMsg = `목표가 $${tgt} 도달 시: 예상 수익 $${simProfit.toFixed(0)} (${simPct > 0?'+':''}${simPct.toFixed(1)}%) / 새 평단 $${newAvg.toFixed(2)}`;
+                } else if (addQty > 0 && addPrice > 0) {
+                    simMsg = `추가 매수 후 새 평단: $${newAvg.toFixed(2)}`;
+                }
+            }
 
-      {/* ── 보유종목 카드 리스트 ── */}
-      {holdings.length > 0 && (
-        <>
-          <div className="section-header" style={{ marginTop: 28 }}>
-            <span className="section-title">📊 보유종목 현황</span>
-            <span className="section-sub">{holdings.length}종목</span>
-          </div>
-          <div className="pf-holdings-grid">
-            {holdings.map(h => {
-              const hPlClass = (h.profitLossPct || 0) >= 0 ? 'up' : 'down'
-              const hPlSign = (h.profitLossPct || 0) >= 0 ? '+' : ''
-              const badge = h.status?.badge || '보통'
-              const emoji = h.status?.emoji || '➡️'
-              const badgeClass = badge === '상승우세' ? 'bullish' : badge === '주의' ? 'caution' : badge === '경고' ? 'warning' : 'normal'
-
-              return (
-                <div key={h.ticker} className={`pf-holding-card pf-border-${badgeClass}`}>
-                  {/* 카드 헤더 */}
-                  <div className="pf-holding-header">
-                    <div>
-                      <div className="pf-holding-ticker">{h.ticker}</div>
-                      <div className="pf-holding-name">{h.name !== h.ticker ? h.name : ''}</div>
-                    </div>
-                    <div className="pf-holding-actions">
-                      <span className={`pf-holding-badge pf-badge-${badgeClass}`}>{emoji} {badge}</span>
-                      <button className="pf-menu-btn" onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === h.ticker ? null : h.ticker) }}>⋯</button>
-                      {menuOpen === h.ticker && (
-                        <div className="pf-dropdown">
-                          <button onClick={() => openEditModal(h)}>✏️ 수정</button>
-                          <button onClick={() => handleRemove(h.ticker)}>🗑️ 삭제</button>
-                        </div>
-                      )}
-                    </div>
+            return (
+              <div key={h.ticker} className={`pf-holding-card pf-border-${badgeClass}`}>
+                {/* 카드 헤더 */}
+                <div className="pf-holding-header">
+                  <div>
+                    <div className="pf-holding-ticker">{h.ticker}</div>
+                    <div className="pf-holding-name">{h.name !== h.ticker ? h.name : ''}</div>
                   </div>
-
-                  {/* 가격 및 손익 */}
-                  <div className="pf-holding-price-row">
-                    <span className="pf-holding-price">
-                      {h.currentPrice != null ? `$${Number(h.currentPrice).toLocaleString()}` : 'N/A'}
-                    </span>
-                    {h.changePct != null && (
-                      <span className={`stock-change ${h.changePct >= 0 ? 'up' : 'down'}`}>
-                        {h.changePct >= 0 ? '+' : ''}{Number(h.changePct).toFixed(2)}%
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="pf-holding-details">
-                    <div className="pf-detail-row">
-                      <span className="pf-detail-label">평단가</span>
-                      <span className="pf-detail-value">${Number(h.avgPrice).toLocaleString()}</span>
-                    </div>
-                    <div className="pf-detail-row">
-                      <span className="pf-detail-label">수량</span>
-                      <span className="pf-detail-value">{h.quantity}주</span>
-                    </div>
-                    <div className="pf-detail-row">
-                      <span className="pf-detail-label">투자금</span>
-                      <span className="pf-detail-value">${Number(h.investedAmount || 0).toLocaleString()}</span>
-                    </div>
-                    <div className="pf-detail-row">
-                      <span className="pf-detail-label">평가액</span>
-                      <span className="pf-detail-value">{h.currentValue != null ? `$${Number(h.currentValue).toLocaleString()}` : '-'}</span>
-                    </div>
-                    <div className="pf-detail-row pf-detail-pl">
-                      <span className="pf-detail-label">평가손익</span>
-                      <span className={`pf-detail-value pf-${hPlClass}`}>
-                        {hPlSign}${Math.abs(h.profitLoss || 0).toLocaleString()} ({hPlSign}{h.profitLossPct || 0}%)
-                      </span>
-                    </div>
-                    {h.weight != null && (
-                      <div className="pf-detail-row">
-                        <span className="pf-detail-label">비중</span>
-                        <span className="pf-detail-value">{h.weight}%</span>
+                  <div className="pf-holding-actions">
+                    <span className={`pf-holding-badge pf-badge-${badgeClass}`}>{emoji} {badge}</span>
+                    <button className="pf-menu-btn" onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === h.ticker ? null : h.ticker) }}>⋯</button>
+                    {menuOpen === h.ticker && (
+                      <div className="pf-dropdown">
+                        <button onClick={() => openEditModal(h)}>✏️ 수정/일지</button>
+                        <button onClick={() => toggleScenario(h.ticker)}>🧮 시나리오</button>
+                        <button onClick={() => handleRemove(h.ticker)}>🗑️ 삭제</button>
                       </div>
                     )}
                   </div>
-
-                  {/* 7팩터 스코어 미니바 */}
-                  {h.status?.scores && (
-                    <div className="pf-scores-mini">
-                      {Object.entries(h.status.scores).map(([key, val]) => {
-                        if (val == null) return null
-                        const labelMap = { trend: '추세', momentum: '모멘텀', financial: '재무', valuation: '밸류', sentiment: '심리', volatility: '변동성', reliability: '신뢰도' }
-                        const barClass = val >= 60 ? 'high' : val >= 40 ? 'mid' : 'low'
-                        return (
-                          <div key={key} className="pf-score-bar-row">
-                            <span className="pf-score-label">{labelMap[key] || key}</span>
-                            <div className="pf-score-bar-bg">
-                              <div className={`pf-score-bar-fill pf-bar-${barClass}`} style={{ width: `${val}%` }} />
-                            </div>
-                            <span className="pf-score-val">{val}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* 전략 문구 */}
-                  {h.status?.strategy && (
-                    <div className="pf-strategy">{h.status.strategy}</div>
-                  )}
-
-                  {/* 이유 태그 */}
-                  {h.status?.reasons?.length > 0 && (
-                    <div className="pf-reasons">
-                      {h.status.reasons.map((r, i) => (
-                        <span key={i} className="pf-reason-tag">{r}</span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* 메모 */}
-                  {h.memo && <div className="pf-memo">📝 {h.memo}</div>}
                 </div>
-              )
-            })}
-          </div>
-        </>
+
+                {/* 가격 및 손익 */}
+                <div className="pf-holding-price-row">
+                  <span className="pf-holding-price">
+                    {h.currentPrice != null ? `$${Number(h.currentPrice).toLocaleString()}` : 'N/A'}
+                  </span>
+                  {h.changePct != null && (
+                    <span className={`stock-change ${h.changePct >= 0 ? 'up' : 'down'}`}>
+                      {h.changePct >= 0 ? '+' : ''}{Number(h.changePct).toFixed(2)}%
+                    </span>
+                  )}
+                </div>
+
+                <div className="pf-holding-details">
+                  <div className="pf-detail-row">
+                    <span className="pf-detail-label">평단가</span>
+                    <span className="pf-detail-value">${Number(h.avgPrice).toLocaleString()}</span>
+                  </div>
+                  <div className="pf-detail-row">
+                    <span className="pf-detail-label">수량 / 투자금</span>
+                    <span className="pf-detail-value">{h.quantity}주 / ${Number(h.investedAmount || 0).toLocaleString()}</span>
+                  </div>
+                  <div className="pf-detail-row pf-detail-pl">
+                    <span className="pf-detail-label">평가손익</span>
+                    <span className={`pf-detail-value pf-${hPlClass}`}>
+                      {hPlSign}${Math.abs(h.profitLoss || 0).toLocaleString()} ({hPlSign}{h.profitLossPct || 0}%)
+                    </span>
+                  </div>
+                  {h.weight != null && (
+                    <div className="pf-detail-row">
+                      <span className="pf-detail-label">비중</span>
+                      <span className="pf-detail-value">{h.weight}%</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* 7팩터 스코어 미니바 */}
+                {h.status?.scores && (
+                  <div className="pf-scores-mini">
+                    {Object.entries(h.status.scores).map(([key, val]) => {
+                      if (val == null) return null
+                      const labelMap = { trend: '추세', momentum: '모멘텀', financial: '재무', valuation: '밸류', sentiment: '심리', volatility: '변동성', reliability: '신뢰도' }
+                      const barClass = val >= 60 ? 'high' : val >= 40 ? 'mid' : 'low'
+                      return (
+                        <div key={key} className="pf-score-bar-row">
+                          <span className="pf-score-label">{labelMap[key] || key}</span>
+                          <div className="pf-score-bar-bg">
+                            <div className={`pf-score-bar-fill pf-bar-${barClass}`} style={{ width: `${val}%` }} />
+                          </div>
+                          <span className="pf-score-val">{val}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* 전략 문구 */}
+                {h.status?.strategy && (
+                  <div className="pf-strategy">{h.status.strategy}</div>
+                )}
+
+                {/* 매매일지 영역 (있을 때만) */}
+                {(h.memo || h.tradeReason || h.targetPrice || h.lossPrice) && (
+                  <div className="pf-journal">
+                    {h.viewTerm && <span className="pf-journal-term">[{h.viewTerm}]</span>}
+                    {h.targetPrice && <span className="pf-journal-tgt">목표 ${h.targetPrice}</span>}
+                    {h.lossPrice && <span className="pf-journal-loss">손절 ${h.lossPrice}</span>}
+                    {h.tradeReason && <div className="pf-journal-reason">이유: {h.tradeReason}</div>}
+                    {h.memo && <div className="pf-journal-memo">📝 {h.memo}</div>}
+                  </div>
+                )}
+
+                {/* 이유 태그 */}
+                {h.status?.reasons?.length > 0 && (
+                  <div className="pf-reasons">
+                    {h.status.reasons.map((r, i) => (
+                      <span key={i} className="pf-reason-tag">{r}</span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 시나리오 계산기 패널 */}
+                {scen && (
+                  <div className="pf-scenario-panel">
+                    <div className="pf-scen-title">🧮 시나리오 시뮬레이터</div>
+                    <div className="pf-scen-inputs">
+                      <input placeholder="추가 매수량(주)" type="number" value={scen.addQty} onChange={e=>updateScenario(h.ticker, 'addQty', e.target.value)} />
+                      <input placeholder="추가 단가($)" type="number" step="0.01" value={scen.addPrice} onChange={e=>updateScenario(h.ticker, 'addPrice', e.target.value)} />
+                      <input placeholder="도달 목표가($)" type="number" step="0.01" value={scen.targetPrice} onChange={e=>updateScenario(h.ticker, 'targetPrice', e.target.value)} />
+                    </div>
+                    {simMsg && <div className="pf-scen-result">{simMsg}</div>}
+                    <button className="pf-scen-close" onClick={()=>toggleScenario(h.ticker)}>닫기</button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
 
       {/* 빈 상태 */}
@@ -808,17 +942,18 @@ function PortfolioPage({ userId }) {
       )}
 
       {/* FAB 종목 추가 버튼 */}
-      <button className="pf-fab" onClick={openAddModal}>＋ 종목 추가</button>
+      <button className="pf-fab" onClick={openAddModal}>＋ 종목 편입</button>
 
       {/* ── 종목 추가/수정 모달 ── */}
       {showAddModal && (
         <div className="pf-modal-overlay" onClick={closeModal}>
-          <div className="pf-modal" onClick={e => e.stopPropagation()}>
+          <div className="pf-modal pf-modal-large" onClick={e => e.stopPropagation()}>
             <div className="pf-modal-header">
-              <span>{editingHolding ? '종목 수정' : '종목 추가'}</span>
+              <span>{editingHolding ? '종목 편입 및 매매일지' : '종목 편입'}</span>
               <button className="pf-modal-close" onClick={closeModal}>✕</button>
             </div>
             <div className="pf-modal-body">
+              <div className="pf-form-section-title">기본 투자 정보</div>
               <label className="pf-form-label">
                 티커 *
                 <input
@@ -861,14 +996,33 @@ function PortfolioPage({ userId }) {
                   />
                 </label>
               </div>
+
+              <div className="pf-form-section-title pf-mt-4">매매 일지 및 알림 (선택)</div>
               <label className="pf-form-label">
-                메모
-                <input
-                  className="pf-form-input"
-                  placeholder="나만의 메모 (선택)"
-                  value={formMemo}
-                  onChange={e => setFormMemo(e.target.value)}
-                />
+                투자 관점
+                <select className="pf-form-input pf-select" value={formViewTerm} onChange={e=>setFormViewTerm(e.target.value)}>
+                  <option value="단기">단기 (스윙/모멘텀)</option>
+                  <option value="중기">중기 (실적/트렌드)</option>
+                  <option value="장기">장기 (배당/가치)</option>
+                </select>
+              </label>
+              <label className="pf-form-label">
+                매수 이유
+                <input className="pf-form-input" placeholder="이 종목을 매수한 핵심 이유는?" value={formTradeReason} onChange={e => setFormTradeReason(e.target.value)} />
+              </label>
+              <div className="pf-form-row">
+                <label className="pf-form-label pf-form-half">
+                  목표가($)
+                  <input className="pf-form-input" type="number" placeholder="익절 타겟" value={formTargetPrice} onChange={e => setFormTargetPrice(e.target.value)} />
+                </label>
+                <label className="pf-form-label pf-form-half">
+                  손절가($)
+                  <input className="pf-form-input" type="number" placeholder="리스크 컷" value={formLossPrice} onChange={e => setFormLossPrice(e.target.value)} />
+                </label>
+              </div>
+              <label className="pf-form-label">
+                기타 메모
+                <input className="pf-form-input" placeholder="추가 기록사항" value={formMemo} onChange={e => setFormMemo(e.target.value)} />
               </label>
             </div>
             <div className="pf-modal-footer">
@@ -878,7 +1032,7 @@ function PortfolioPage({ userId }) {
                 onClick={editingHolding ? handleUpdate : handleAdd}
                 disabled={!editingHolding && (!formTicker || !formQty || !formPrice)}
               >
-                {editingHolding ? '수정' : '추가'}
+                {editingHolding ? '수정 사항 저장' : '등록'}
               </button>
             </div>
           </div>

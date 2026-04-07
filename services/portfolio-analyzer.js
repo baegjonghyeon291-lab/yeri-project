@@ -378,4 +378,110 @@ function buildPortfolioSummary(holdingsWithStatus) {
     return summary;
 }
 
-module.exports = { analyzeHolding, buildPortfolioSummary };
+/** 포트폴리오 비중 분석 */
+function analyzeAllocation(holdings, totalValue) {
+    if (!totalValue || holdings.length === 0) return null;
+    let overConcentrated = [];
+    let allocations = holdings.map(h => {
+        const value = h.currentValue || (h.quantity * (h.currentPrice || h.avgPrice));
+        const weight = (value / totalValue) * 100;
+        if (weight >= 30) overConcentrated.push({ ticker: h.ticker, weight });
+        return { ticker: h.ticker, weight: Number(weight.toFixed(1)) };
+    });
+    return {
+        overConcentrated,
+        details: allocations.sort((a,b) => b.weight - a.weight)
+    };
+}
+
+/** 포트폴리오 건강도 점수 */
+function calculateHealthScore(holdingsWithStatus, allocations, summary) {
+    if (holdingsWithStatus.length === 0) return { score: 0, label: '데이터 없음', strengths: [], weaknesses: [] };
+    
+    let totalScore = 0;
+    // 종합 점수의 평균
+    const overallScores = holdingsWithStatus.map(h => h.status?.overall).filter(s => s != null);
+    const avgOverall = overallScores.length ? overallScores.reduce((a,b)=>a+b,0) / overallScores.length : 50;
+    
+    totalScore += avgOverall * 0.5; // 종목 상태 50%
+    
+    // 분산도 (최대 비중 종목이 너무 크면 페널티)
+    let maxWeight = 0;
+    if (allocations?.details?.length > 0) {
+        maxWeight = allocations.details[0].weight;
+    }
+    const diversityScore = Math.max(0, 100 - (maxWeight > 30 ? (maxWeight - 30) * 2 : 0));
+    totalScore += diversityScore * 0.3; // 분산도 30%
+    
+    // 이익 상태 (손익 상태)
+    const profitCount = holdingsWithStatus.filter(h => (h.profitLoss || 0) > 0).length;
+    const profitScore = (profitCount / holdingsWithStatus.length) * 100;
+    totalScore += profitScore * 0.2; // 수익 종목 비율 20%
+    
+    const score = Math.round(totalScore);
+    let label = '위험';
+    if (score >= 80) label = '우수';
+    else if (score >= 60) label = '양호';
+    else if (score >= 40) label = '보통';
+    else if (score >= 20) label = '주의';
+
+    const strengths = [];
+    const weaknesses = [];
+
+    if (profitScore >= 70) strengths.push('수익성 양호');
+    if (diversityScore >= 80) strengths.push('분산 투자 우수');
+    if (avgOverall >= 70) strengths.push('종목 모멘텀/추세 긍정적');
+
+    if (maxWeight >= 40) weaknesses.push('특정 종목 과집중');
+    if (summary.warningCount > 0) weaknesses.push(`경고 종목 ${summary.warningCount}개 존재`);
+    if (profitScore <= 30) weaknesses.push('손실 종목 과다');
+
+    return { score, label, strengths, weaknesses };
+}
+
+/** 자동 리밸런싱 제안 */
+function calculateRebalancing(allocations, health, summary) {
+    const suggestions = [];
+    if (allocations?.overConcentrated?.length > 0) {
+        const t = allocations.overConcentrated.map(a => `${a.ticker}(${a.weight.toFixed(1)}%)`).join(', ');
+        suggestions.push(`${t} 비중이 30%를 초과하여 과집중 리스크가 있습니다. 일부 축소를 검토할 수 있습니다.`);
+    }
+    if (health.score < 50) {
+        suggestions.push('전체적인 포트폴리오 건강도가 낮습니다. 현금 비중 확대나 방어주 편입을 고려해 보세요.');
+    }
+    if (summary.warningCount >= 2) {
+        suggestions.push('경고 배지를 받은 종목이 2개 이상입니다. 해당 종목들의 리스크 점검이 시급합니다.');
+    }
+    if (suggestions.length === 0) {
+        suggestions.push('전반적인 비중과 리스크가 잘 관리되고 있습니다. 현행 유지를 기본으로 시장 변동에 대응하세요.');
+    }
+    return suggestions;
+}
+
+/** 일일 브리핑/한줄 요약 위젯 데이터 추가 */
+function buildDailyBriefing(summary, health, holdings) {
+    // 총 손익 정보
+    const totalInvested = holdings.reduce((sum, h) => sum + (h.investedAmount || 0), 0);
+    const totalValue = holdings.reduce((sum, h) => sum + (h.currentValue || h.investedAmount || 0), 0);
+    const profitLossPct = totalInvested > 0 ? ((totalValue / totalInvested) - 1) * 100 : 0;
+    const plClass = profitLossPct >= 0 ? '+' : '';
+
+    const strongTicker = summary.strongTop3[0]?.ticker || '-';
+    const riskTicker = summary.riskTop3[0]?.ticker || '-';
+    
+    // 단순화된 한줄 결론
+    let oneLiner = '';
+    if (health.score >= 70) oneLiner = `수익 구간을 즐기되, ${riskTicker} 등은 리스크 점검이 필요합니다.`;
+    else if (health.score >= 40) oneLiner = `시장 방향성 탐색 구간입니다. 비중 관리에 신경쓰세요.`;
+    else oneLiner = `포트폴리오 변동성이 큽니다. 보수적인 리밸런싱이 필요해 보입니다.`;
+
+    const widget = `오늘 상태: ${health.label} | 손익 ${plClass}${profitLossPct.toFixed(1)}% | 리스크 체크: ${riskTicker}`;
+
+    return {
+        text: `[ 일일 포트폴리오 브리핑 ]\n- 종합 상태: ${health.label} (${health.score}점)\n- 총 평가손익: ${plClass}${profitLossPct.toFixed(1)}%\n- 오늘 가장 강세인 종목: ${strongTicker}\n- 오늘 점검이 필요한 종목: ${riskTicker}\n- 한줄 결론: ${oneLiner}`,
+        widget,
+        oneLiner
+    };
+}
+
+module.exports = { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing };

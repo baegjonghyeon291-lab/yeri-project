@@ -64,7 +64,7 @@ const { generateRecommendations } = require('./services/recommendation-engine');
 const sessions = require('./services/session');
 const watchlistStore = require('./services/watchlist-store');
 const portfolioStore = require('./services/portfolio-store');
-const { analyzeHolding, buildPortfolioSummary } = require('./services/portfolio-analyzer');
+const { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing } = require('./services/portfolio-analyzer');
 const userSettings = require('./services/user-settings');
 const { scanWatchlist, invalidateCache } = require('./services/alert-engine');
 
@@ -798,6 +798,10 @@ app.get('/api/portfolio/:userId', async (req, res) => {
 
         // 포트폴리오 전체 상태 요약
         const portfolioStatus = buildPortfolioSummary(enriched);
+        const allocations = analyzeAllocation(enriched, totalValue);
+        const healthScore = calculateHealthScore(enriched, allocations, portfolioStatus);
+        const rebalancing = calculateRebalancing(allocations, healthScore, portfolioStatus);
+        const dailyBriefing = buildDailyBriefing(portfolioStatus, healthScore, enriched);
 
         res.json({
             holdings: enriched,
@@ -809,6 +813,10 @@ app.get('/api/portfolio/:userId', async (req, res) => {
                 totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
             },
             portfolioStatus,
+            allocations,
+            healthScore,
+            rebalancing,
+            dailyBriefing
         });
     } catch (err) {
         console.error('[Portfolio GET]', err.message);
@@ -818,12 +826,12 @@ app.get('/api/portfolio/:userId', async (req, res) => {
 
 // POST /api/portfolio/:userId/add — 종목 추가
 app.post('/api/portfolio/:userId/add', (req, res) => {
-    const { ticker, name, quantity, avgPrice, buyDate, memo } = req.body;
+    const { ticker, name, quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts } = req.body;
     if (!ticker || !quantity || !avgPrice) {
         return res.status(400).json({ error: 'ticker, quantity, avgPrice are required' });
     }
     const result = portfolioStore.add(req.params.userId, {
-        ticker, name: name || ticker.toUpperCase(), quantity, avgPrice, buyDate, memo
+        ticker, name: name || ticker.toUpperCase(), quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts
     });
     res.json({
         result,
@@ -834,9 +842,9 @@ app.post('/api/portfolio/:userId/add', (req, res) => {
 
 // POST /api/portfolio/:userId/update — 수량/평단가 수정
 app.post('/api/portfolio/:userId/update', (req, res) => {
-    const { ticker, quantity, avgPrice, name } = req.body;
+    const { ticker, quantity, avgPrice, name, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts } = req.body;
     if (!ticker) return res.status(400).json({ error: 'ticker is required' });
-    const result = portfolioStore.update(req.params.userId, ticker, { quantity, avgPrice, name });
+    const result = portfolioStore.update(req.params.userId, ticker, { quantity, avgPrice, name, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts });
     if (!result) return res.status(404).json({ error: `${ticker} not found in portfolio` });
     res.json({
         result: 'updated',
@@ -855,6 +863,19 @@ app.post('/api/portfolio/:userId/remove', (req, res) => {
         holdings: portfolioStore.get(req.params.userId),
         summary: portfolioStore.getSummary(req.params.userId)
     });
+});
+
+// POST /api/portfolio/:userId/snapshot — 백그라운드 스냅샷 저장
+app.post('/api/portfolio/:userId/snapshot', (req, res) => {
+    const { totalValue, totalProfitLoss, totalProfitLossPct, healthScore, allocations } = req.body;
+    portfolioStore.saveSnapshot(req.params.userId, { totalValue, totalProfitLoss, totalProfitLossPct, healthScore, allocations });
+    res.json({ ok: true });
+});
+
+// GET /api/portfolio/:userId/history — 히스토리 조회
+app.get('/api/portfolio/:userId/history', (req, res) => {
+    const history = portfolioStore.getHistory(req.params.userId);
+    res.json({ history });
 });
 
 // GET /api/portfolio/:userId/briefing — GPT 포트폴리오 브리핑

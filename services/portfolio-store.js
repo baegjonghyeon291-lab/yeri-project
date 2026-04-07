@@ -49,7 +49,7 @@ function get(userId) {
  * - 신규 종목이면 추가
  * @returns 'added' | 'merged' | 'limit_reached'
  */
-function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo }) {
+function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts }) {
     const { all, id } = getUserData(userId);
     const upper = (ticker || '').toUpperCase();
     const qty   = Number(quantity) || 0;
@@ -66,6 +66,11 @@ function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo }) {
         existing.avgPrice = Math.round((totalCost / totalQty) * 100) / 100;
         existing.quantity = totalQty;
         if (name) existing.name = name;
+        if (tradeReason !== undefined) existing.tradeReason = tradeReason;
+        if (targetPrice !== undefined) existing.targetPrice = targetPrice;
+        if (lossPrice !== undefined) existing.lossPrice = lossPrice;
+        if (viewTerm !== undefined) existing.viewTerm = viewTerm;
+        if (alerts !== undefined) existing.alerts = alerts;
         save(all);
         return 'merged';
     }
@@ -79,6 +84,11 @@ function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo }) {
         avgPrice: price,
         buyDate: buyDate || null,
         memo:    memo || null,
+        tradeReason: tradeReason || null,
+        targetPrice: targetPrice ? Number(targetPrice) : null,
+        lossPrice: lossPrice ? Number(lossPrice) : null,
+        viewTerm: viewTerm || '단기',
+        alerts: alerts || { enabled: false }, // default alert settings
         addedAt: new Date().toISOString()
     });
     save(all);
@@ -86,7 +96,7 @@ function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo }) {
 }
 
 /**
- * 종목 수량/평단가 수정
+ * 종목 수량/평단가 및 메타데이터 수정
  * @returns true (성공) | false (종목 없음)
  */
 function update(userId, ticker, updates) {
@@ -101,9 +111,16 @@ function update(userId, ticker, updates) {
     if (updates.avgPrice != null && Number(updates.avgPrice) > 0) {
         holding.avgPrice = Number(updates.avgPrice);
     }
-    if (updates.name) holding.name = updates.name;
+    if (updates.name !== undefined) holding.name = updates.name;
     if (updates.buyDate !== undefined) holding.buyDate = updates.buyDate;
     if (updates.memo !== undefined) holding.memo = updates.memo;
+    
+    // 신규 메타데이터 업데이트
+    if (updates.tradeReason !== undefined) holding.tradeReason = updates.tradeReason;
+    if (updates.targetPrice !== undefined) holding.targetPrice = updates.targetPrice ? Number(updates.targetPrice) : null;
+    if (updates.lossPrice !== undefined) holding.lossPrice = updates.lossPrice ? Number(updates.lossPrice) : null;
+    if (updates.viewTerm !== undefined) holding.viewTerm = updates.viewTerm;
+    if (updates.alerts !== undefined) holding.alerts = updates.alerts;
 
     save(all);
     return true;
@@ -123,6 +140,7 @@ function remove(userId, ticker) {
 function clear(userId) {
     const { all, id } = getUserData(userId);
     all[id].holdings = [];
+    all[id].history = [];
     save(all);
 }
 
@@ -137,6 +155,39 @@ function getSummary(userId) {
     };
 }
 
+/** 포트폴리오 히스토리 스냅샷 추가 */
+function saveSnapshot(userId, snapshotData) {
+    const { all, id } = getUserData(userId);
+    if (!all[id].history) all[id].history = [];
+    
+    // 오늘 날짜의 스냅샷이 이미 있으면 덮어쓰기 (하루 1회 갱신 처리용)
+    const today = new Date().toISOString().split('T')[0];
+    const existingIndex = all[id].history.findIndex(h => h.date && h.date.startsWith(today));
+    
+    const snapshot = {
+        date: new Date().toISOString(),
+        ...snapshotData
+    };
+
+    if (existingIndex >= 0) {
+        all[id].history[existingIndex] = snapshot;
+    } else {
+        all[id].history.push(snapshot);
+    }
+    
+    // 히스토리 최대 100개(약 3개월치)만 유지
+    if (all[id].history.length > 100) {
+        all[id].history = all[id].history.slice(-100);
+    }
+    save(all);
+}
+
+/** 포트폴리오 히스토리 조회 */
+function getHistory(userId) {
+    const { all, id } = getUserData(userId);
+    return all[id].history || [];
+}
+
 function getLimit() { return MAX_HOLDINGS; }
 
-module.exports = { get, add, update, remove, clear, getSummary, getLimit };
+module.exports = { get, add, update, remove, clear, getSummary, saveSnapshot, getHistory, getLimit };

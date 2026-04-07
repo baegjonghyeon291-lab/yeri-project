@@ -1171,6 +1171,74 @@ a { color: inherit; text-decoration: none; }
 .pf-modal-submit:hover { opacity: .85; }
 .pf-modal-submit:disabled { opacity: .4; cursor: not-allowed; }
 
+/* ─── 확장 기능 CSS (Phase 2) ────────────────────── */
+.pf-page-wrapper { display: flex; flex-direction: column; gap: 16px; }
+
+.pf-oneliner-widget {
+  background: var(--surface2); border: 1px solid var(--border); padding: 12px 14px;
+  border-radius: var(--radius); font-size: .85rem; font-weight: 600; color: var(--gold);
+}
+
+.pf-tabs { display: flex; gap: 8px; margin-top: -6px; margin-bottom: 12px; }
+.pf-tabs button {
+  flex: 1; padding: 10px; background: var(--surface); color: var(--text-sub);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: .85rem; font-weight: 600; cursor: pointer; transition: all .2s;
+}
+.pf-tabs button.active { background: var(--surface2); color: var(--text); border-color: var(--gold); }
+
+.pf-health-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.pf-health-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.pf-health-title { font-size: .85rem; font-weight: 600; color: var(--text-sub); margin-bottom: 4px; }
+.pf-health-label { font-size: 1.1rem; font-weight: 700; }
+.pf-health-우수 { color: #34d399; } .pf-health-양호 { color: #60a5fa; } .pf-health-보통 { color: #facc15; } .pf-health-주의 { color: #fb923c; } .pf-health-위험 { color: #f87171; }
+.pf-health-circle { width: 50px; height: 50px; }
+.circular-chart { display: block; margin: 0 auto; max-width: 100%; max-height: 250px; }
+.circle-bg { fill: none; stroke: var(--surface2); stroke-width: 3.8; }
+.circle { fill: none; stroke-width: 3.8; stroke-linecap: round; animation: progress 1s ease-out forwards; }
+.stroke-우수 { stroke: #34d399; } .stroke-양호 { stroke: #60a5fa; } .stroke-보통 { stroke: #facc15; } .stroke-주의 { stroke: #fb923c; } .stroke-위험 { stroke: #f87171; }
+.percentage { fill: var(--text); font-family: sans-serif; font-size: 0.5em; text-anchor: middle; font-weight: bold; }
+@keyframes progress { 0% { stroke-dasharray: 0 100; } }
+
+.pf-health-details { border-top: 1px dashed var(--border); padding-top: 12px; font-size: .75rem; }
+.pf-health-good { color: #34d399; margin-bottom: 4px; }
+.pf-health-bad { color: #f87171; }
+
+.pf-daily-briefing { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.pf-daily-briefing pre { margin: 0 0 12px 0; font-family: inherit; font-size: .8rem; white-space: pre-wrap; color: var(--text); line-height: 1.5; }
+
+.pf-allocation-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.pf-alloc-title { font-size: .9rem; font-weight: 700; margin-bottom: 12px; }
+.pf-alloc-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: .8rem; }
+.pf-alloc-label { width: 50px; font-weight: 600; color: var(--text-sub); }
+.pf-alloc-val { width: 40px; text-align: right; font-weight: 600; }
+.pf-alloc-bar-bg { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+.pf-alloc-bar-fill { height: 100%; border-radius: 4px; }
+.pf-rebalance-box { margin-top: 16px; background: rgba(250, 204, 21, 0.1); border: 1px solid var(--gold); border-radius: var(--radius-sm); padding: 12px; }
+.pf-rebalance-title { font-size: .8rem; font-weight: 700; color: var(--gold); margin-bottom: 8px; }
+.pf-rebalance-box ul { margin: 0; padding-left: 20px; font-size: .75rem; color: var(--text-sub); }
+.pf-rebalance-box li { margin-bottom: 4px; }
+
+.pf-journal { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; font-size: .75rem; color: var(--text-sub); }
+.pf-journal-term { color: var(--gold); font-weight: 600; margin-right: 6px; }
+.pf-journal-tgt { color: var(--green); margin-right: 6px; }
+.pf-journal-loss { color: var(--red); margin-right: 6px; }
+.pf-journal-reason { margin-top: 4px; }
+.pf-journal-memo { margin-top: 4px; }
+
+.pf-mt-4 { margin-top: 16px; }
+.pf-select { padding: 8px 14px; }
+
+.pf-scenario-panel { margin-top: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
+.pf-scen-title { font-size: .8rem; font-weight: 700; margin-bottom: 8px; color: var(--gold); }
+.pf-scen-inputs { display: flex; gap: 8px; margin-bottom: 8px; }
+.pf-scen-inputs input { flex: 1; width: 0; padding: 6px; font-size: .75rem; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.pf-scen-result { font-size: .75rem; font-weight: 600; color: var(--text); margin-bottom: 8px; text-align: center; }
+.pf-scen-close { display: block; width: 100%; border: none; background: transparent; color: var(--text-sub); font-size: .75rem; cursor: pointer; text-decoration: underline; }
+
+.pf-modal-large { max-height: 90vh; overflow-y: auto; }
+.pf-form-section-title { font-size: .85rem; font-weight: 700; color: var(--text); margin: 12px 0; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+
 /* ─── 포트폴리오 반응형 ────────────────────── */
 @media (max-width: 640px) {
   .pf-summary-card { padding: 16px; }
