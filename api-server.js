@@ -190,8 +190,8 @@ app.post('/api/chat', async (req, res) => {
         const isPortfolioKeyword = PORTFOLIO_KEYWORDS.some(k => text.includes(k));
         
         if (intent.type === 'portfolio' || isPortfolioKeyword) {
-            console.log(`[API /chat] ▶ Portfolio intent 매칭 (fallback 금지) → 실시간 요약 브리핑 생성`);
             const targetUserId = req.body.chatId || 'webapp';
+            console.log(`[API /chat] ▶ Portfolio intent 매칭 - 검색에 사용된 세션키(chatId): [${targetUserId}]`);
             const snap = await buildPortfolioSnapshot(targetUserId);
 
             if (!snap) {
@@ -833,6 +833,7 @@ async function buildPortfolioSnapshot(userId) {
 
 // GET /api/portfolio/:userId — 포트폴리오 조회 (실시간 가격 + 수익률 + 상태판단)
 app.get('/api/portfolio/:userId', async (req, res) => {
+    console.log(`[API /portfolio/GET] ▶ 포트폴리오 조회 요청 수신됨 - 조회에 사용된 세션키(userId): [${req.params.userId}]`);
     try {
         const snap = await buildPortfolioSnapshot(req.params.userId);
         if (!snap) {
@@ -852,6 +853,7 @@ app.get('/api/portfolio/:userId', async (req, res) => {
 
 // POST /api/portfolio/:userId/add — 종목 추가
 app.post('/api/portfolio/:userId/add', (req, res) => {
+    console.log(`[API /portfolio/add] ▶ 종목 추가 요청 수신됨 - 저장에 사용된 세션키(userId): [${req.params.userId}]`);
     const { ticker, name, quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts } = req.body;
     if (!ticker || !quantity || !avgPrice) {
         return res.status(400).json({ error: 'ticker, quantity, avgPrice are required' });
