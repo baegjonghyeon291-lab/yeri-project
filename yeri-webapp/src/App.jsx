@@ -1076,7 +1076,36 @@ export default function App() {
   const [page, setPage] = useState('watchlist') // 'watchlist' | 'chat' | 'portfolio'
   const [chatId, setChatId] = useState(() => localStorage.getItem('yeri_chatId') || '')
   const [alertCount, setAlertCount] = useState(0)
-  
+  // 자동 버전 체크 (앱 진입 및 백그라운드 복귀 시)
+  useEffect(() => {
+    async function autoCheckUpdate() {
+      try {
+        const res = await fetch(`${API_BASE}/version`)
+        const data = await res.json()
+        if (data.commitHash && data.commitHash !== 'unknown' && data.commitHash !== BUILD_HASH) {
+          if (confirm('🚀 새로운 업데이트 버전이 배포되었습니다!\n원활한 이용을 위해 지금 확인을 눌러 최신 버전으로 새로고침해주세요.')) {
+            window.location.reload(true)
+          }
+        }
+      } catch (e) {
+        // 백그라운드 체크 실패 시 조용히 무시
+      }
+    }
+
+    // 마운트 시 최초 1회 확인
+    autoCheckUpdate()
+
+    // 홈 화면 PWA에서 백그라운드 -> 포그라운드로 복귀할 때마다 확인
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        autoCheckUpdate()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
   // 앱 (원격) 업데이트 수동 확인 기능
   async function handleCheckUpdate() {
     try {
