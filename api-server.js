@@ -89,6 +89,11 @@ app.use((req, res, next) => {
     if (!req.path.startsWith('/assets') && !req.path.includes('/api/debug/logs')) {
         logDebug(`[GLOBAL] ${req.method} ${req.path}`);
     }
+    if (req.path.startsWith('/api/')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+    }
     next();
 });
 

@@ -491,7 +491,7 @@ function PortfolioPage({ userId }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/portfolio/${userId}`)
+      const res = await fetch(`${API_BASE}/portfolio/${userId}?t=${Date.now()}`, { cache: 'no-store' })
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       setHoldings(data.holdings || [])
@@ -580,7 +580,7 @@ function PortfolioPage({ userId }) {
   async function fetchBriefing() {
     setBriefingLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/portfolio/${userId}/briefing`)
+      const res = await fetch(`${API_BASE}/portfolio/${userId}/briefing?t=${Date.now()}`, { cache: 'no-store' })
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       setBriefingReport(data.report || '브리핑 데이터가 없습니다.')
