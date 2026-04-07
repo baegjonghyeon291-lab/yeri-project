@@ -791,8 +791,8 @@ app.post('/api/portfolio/analyze', async (req, res) => {
 });
 
 // 공통 포트폴리오 스냅샷 생성 함수
-async function buildPortfolioSnapshot(userId) {
-    const holdings = portfolioStore.get(userId);
+async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
+    const holdings = overrideHoldings || portfolioStore.get(userId);
     if (!holdings || holdings.length === 0) return null;
 
     const enriched = [];
@@ -821,6 +821,7 @@ async function buildPortfolioSnapshot(userId) {
         enriched.push({
             ticker: h.ticker, name: h.name, quantity: h.quantity, avgPrice: h.avgPrice,
             buyDate: h.buyDate || null, memo: h.memo || null, alerts: h.alerts,
+            trades: h.trades || [],
             currentPrice, changePct,
             investedAmount: Math.round(investedAmount * 100) / 100,
             currentValue: currentValue != null ? Math.round(currentValue * 100) / 100 : null,
@@ -976,6 +977,55 @@ app.post('/api/portfolio/:userId/remove', (req, res) => {
         holdings: portfolioStore.get(req.params.userId),
         summary: portfolioStore.getSummary(req.params.userId)
     });
+});
+
+// POST /api/portfolio/:userId/trades — 매수/매도 기록 추가
+app.post('/api/portfolio/:userId/trades', (req, res) => {
+    try {
+        const { ticker, type, date, price, quantity, memo } = req.body;
+        const result = portfolioStore.addTrade(req.params.userId, ticker, { type, date, price, quantity, memo });
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/portfolio/:userId/simulate — 시뮬레이터 (매수/매도 시뮬레이션)
+app.post('/api/portfolio/:userId/simulate', async (req, res) => {
+    try {
+        const { ticker, type, price, quantity } = req.body;
+        if (!ticker || !type || !price || !quantity) return res.status(400).json({ error: 'Missing params' });
+        
+        // 원본 데이터를 깊은 복사하여 가상 포트폴리오 생성
+        const holdings = JSON.parse(JSON.stringify(portfolioStore.get(req.params.userId)));
+        
+        let target = holdings.find(h => h.ticker === ticker);
+        if (type === 'buy') {
+            if (!target) {
+                target = { ticker, name: ticker, quantity: 0, avgPrice: 0 };
+                holdings.push(target);
+            }
+            const cost = (target.quantity * target.avgPrice) + (quantity * price);
+            target.quantity += quantity;
+            target.avgPrice = Math.round((cost / target.quantity) * 100) / 100;
+        } else if (type === 'sell') {
+            if (target) {
+                target.quantity -= quantity;
+                if (target.quantity <= 0) {
+                    target.quantity = 0;
+                    target.avgPrice = 0;
+                }
+            }
+        }
+        
+        // 현재 원본과 가상 포트폴리오 비교
+        const before = await buildPortfolioSnapshot(req.params.userId);
+        const after = await buildPortfolioSnapshot(req.params.userId, holdings);
+        
+        res.json({ ok: true, before, after });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // POST /api/portfolio/:userId/snapshot — 백그라운드 스냅샷 저장

@@ -89,7 +89,17 @@ function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo, tradeRea
         lossPrice: lossPrice ? Number(lossPrice) : null,
         viewTerm: viewTerm || '단기',
         alerts: alerts || { enabled: false }, // default alert settings
+        trades: [],
         addedAt: new Date().toISOString()
+    });
+    // 최초 등록을 매수 기록으로 추가
+    all[id].holdings[all[id].holdings.length - 1].trades.push({
+        id: Date.now().toString(),
+        type: 'buy',
+        date: buyDate || new Date().toISOString().split('T')[0],
+        price: price,
+        quantity: qty,
+        memo: memo || '최초 등록'
     });
     save(all);
     return 'added';
@@ -134,6 +144,67 @@ function remove(userId, ticker) {
     all[id].holdings = all[id].holdings.filter(h => h.ticker !== upper);
     save(all);
     return all[id].holdings.length < before;
+}
+
+/** 매수/매도 기록 추가 */
+function addTrade(userId, ticker, trade) {
+    const { all, id } = getUserData(userId);
+    const upper = (ticker || '').toUpperCase();
+    const holding = all[id].holdings.find(h => h.ticker === upper);
+    if (!holding) return { ok: false, error: '종목을 찾을 수 없습니다.' };
+
+    if (!holding.trades) holding.trades = [];
+
+    const newTrade = {
+        id: Date.now().toString(),
+        type: trade.type || 'buy', // 'buy' or 'sell'
+        date: trade.date || new Date().toISOString().split('T')[0],
+        price: Number(trade.price) || 0,
+        quantity: Number(trade.quantity) || 0,
+        memo: trade.memo || ''
+    };
+
+    if (newTrade.price <= 0 || newTrade.quantity <= 0) {
+        return { ok: false, error: '가격과 수량은 0보다 커야 합니다.' };
+    }
+
+    if (newTrade.type === 'sell' && newTrade.quantity > holding.quantity) {
+        return { ok: false, error: '매도 수량이 보유 수량보다 많습니다.' };
+    }
+
+    holding.trades.push(newTrade);
+
+    // 보유 수량 및 평단가 재계산
+    let currentQty = 0;
+    let totalCost = 0;
+
+    // 모든 거래 내역을 시간순으로 정렬하여 재계산
+    holding.trades.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || Number(a.id) - Number(b.id));
+
+    for (const t of holding.trades) {
+        if (t.type === 'buy') {
+            totalCost += (t.price * t.quantity);
+            currentQty += t.quantity;
+        } else if (t.type === 'sell') {
+            // 매도 시에는 평단가는 변하지 않고(실현손익 발생), 남은 수량과 보유 원금이 줄어듭니다.
+            const avgCost = currentQty > 0 ? (totalCost / currentQty) : 0;
+            currentQty -= t.quantity;
+            totalCost = currentQty * avgCost;
+        }
+    }
+
+    if (currentQty <= 0) {
+        // 전량 매도 => 포트폴리오에서 삭제? 아니면 0주로 유지?
+        // 보통은 삭제하거나 히스토리에만 둡니다. 여기서는 수량/평단을 0으로 설정합니다.
+        holding.quantity = 0;
+        holding.avgPrice = 0;
+    } else {
+        holding.quantity = currentQty;
+        holding.avgPrice = Math.round((totalCost / currentQty) * 100) / 100;
+    }
+
+    save(all);
+    return { ok: true, holding };
 }
 
 /** 전체 초기화 */
@@ -190,4 +261,4 @@ function getHistory(userId) {
 
 function getLimit() { return MAX_HOLDINGS; }
 
-module.exports = { get, add, update, remove, clear, getSummary, saveSnapshot, getHistory, getLimit };
+module.exports = { get, add, update, remove, clear, getSummary, saveSnapshot, getHistory, getLimit, addTrade };
