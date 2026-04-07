@@ -188,6 +188,48 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 32px;
 }
 
+/* ─── 홈 포트폴리오 위젯 ───────────────────────────── */
+.pf-widget-card {
+  background: linear-gradient(145deg, var(--surface) 0%, rgba(255,255,255,0.02) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 24px;
+  cursor: pointer;
+  transition: transform .15s, box-shadow .15s, border-color .15s;
+}
+.pf-widget-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.pf-widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.pf-widget-header .up { color: var(--green); }
+.pf-widget-header .down { color: var(--red); }
+.pf-widget-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-sub);
+  margin-bottom: 12px;
+}
+.pf-widget-footer {
+  font-size: 0.8rem;
+  color: var(--blue);
+  text-align: right;
+  font-weight: 500;
+}
+
 .alert-card {
   background: var(--surface);
   border: 1px solid var(--border);

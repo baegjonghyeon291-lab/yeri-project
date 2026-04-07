@@ -190,9 +190,29 @@ app.post('/api/chat', async (req, res) => {
         const isPortfolioKeyword = PORTFOLIO_KEYWORDS.some(k => text.includes(k));
         
         if (intent.type === 'portfolio' || isPortfolioKeyword) {
-            console.log(`[API /chat] ▶ Portfolio intent 매칭 (fallback 금지) → 포트폴리오 탭 안내 반환`);
+            console.log(`[API /chat] ▶ Portfolio intent 매칭 (fallback 금지) → 실시간 요약 브리핑 생성`);
+            const targetUserId = req.body.chatId || 'webapp';
+            const snap = await buildPortfolioSnapshot(targetUserId);
+
+            if (!snap) {
+                messages.push({ type: 'text', content: '현재 등록된 포트폴리오 종목이 없습니다. 화면 우측 상단의 **[포트폴리오 분석]** 탭에서 종목을 먼저 추가해 주세요!' });
+                return res.json({ messages });
+            }
+
+            const plSign = snap.summary.totalProfitLossPct >= 0 ? '+' : '';
+            const riskTop = snap.portfolioStatus.riskTop3.map(r=>r.ticker).join(', ') || '없음';
+            const strongTop = snap.portfolioStatus.strongTop3.map(s=>s.ticker).join(', ') || '없음';
+            // 리밸런싱 포인트는 배열의 첫 문장 (가장 중요한 것)
+            const rebal = snap.rebalancing[0]?.replace(/[🔴🟢⚠️✅]|\[.*?\] /g, '').trim() || '특이사항 없음';
             
-            const reply = `📊 **포트폴리오 전용 대시보드 연동 완료**\n\n현재 포트폴리오의 실시간 7팩터 상태 및 리밸런싱 제안, 종목별 배지 정보는 전용 페이지에서 확인하실 수 있습니다.\n화면 우측 상단의 **[포트폴리오 분석]** 탭을 통해 즉각적인 일일 브리핑과 전체 투자 종합 진단을 확인해 보세요.`;
+            const reply = `📊 **내 포트폴리오 요약 브리핑**
+- **오늘 상태 요약**: ${snap.healthScore.label} (${snap.healthScore.score}점)
+- **총 평가손익**: ${plSign}${snap.summary.totalProfitLossPct.toFixed(1)}%
+- **위험 종목 TOP**: ${riskTop}
+- **강세 종목 TOP**: ${strongTop}
+- **리밸런싱 포인트**: ${rebal}
+
+👉 화면 상단의 **[포트폴리오 분석]** 탭을 누르시면 종목별 상세 배지와 시나리오 시뮬레이터를 확인하실 수 있습니다.`;
             
             messages.push({ type: 'text', content: reply });
             return res.json({ messages });
@@ -742,11 +762,80 @@ app.post('/api/portfolio/analyze', async (req, res) => {
     }
 });
 
+// 공통 포트폴리오 스냅샷 생성 함수
+async function buildPortfolioSnapshot(userId) {
+    const holdings = portfolioStore.get(userId);
+    if (!holdings || holdings.length === 0) return null;
+
+    const enriched = [];
+    for (const h of holdings) {
+        let stockData = null, currentPrice = null, changePct = null;
+        try {
+            stockData = await fetchAllStockData(h.ticker, h.name);
+            currentPrice = stockData.price?.current ?? null;
+            changePct = stockData.price?.changePct ?? null;
+        } catch (e) {
+            console.error(`[Portfolio] ${h.ticker} 데이터 조회 실패:`, e.message);
+        }
+
+        const investedAmount = h.quantity * h.avgPrice;
+        const currentValue = currentPrice != null ? h.quantity * currentPrice : null;
+        const profitLoss = currentValue != null ? currentValue - investedAmount : null;
+        const profitLossPct = investedAmount > 0 && profitLoss != null
+            ? Math.round((profitLoss / investedAmount) * 10000) / 100
+            : null;
+
+        let status = null;
+        if (stockData) {
+            status = analyzeHolding(stockData, h);
+        }
+
+        enriched.push({
+            ticker: h.ticker, name: h.name, quantity: h.quantity, avgPrice: h.avgPrice,
+            buyDate: h.buyDate || null, memo: h.memo || null,
+            currentPrice, changePct,
+            investedAmount: Math.round(investedAmount * 100) / 100,
+            currentValue: currentValue != null ? Math.round(currentValue * 100) / 100 : null,
+            profitLoss: profitLoss != null ? Math.round(profitLoss * 100) / 100 : null,
+            profitLossPct, status, dataAsOf: new Date().toISOString(),
+        });
+        await new Promise(r => setTimeout(r, 200));
+    }
+
+    const totalInvested = enriched.reduce((s, h) => s + h.investedAmount, 0);
+    const totalValue = enriched.reduce((s, h) => s + (h.currentValue || h.investedAmount), 0);
+    const totalPL = totalValue - totalInvested;
+
+    enriched.forEach(h => {
+        h.weight = totalValue > 0 && h.currentValue != null
+            ? Math.round((h.currentValue / totalValue) * 10000) / 100
+            : null;
+    });
+
+    const portfolioStatus = buildPortfolioSummary(enriched);
+    const allocations = analyzeAllocation(enriched, totalValue);
+    const healthScore = calculateHealthScore(enriched, allocations, portfolioStatus);
+    const rebalancing = calculateRebalancing(allocations, healthScore, portfolioStatus);
+    const dailyBriefing = buildDailyBriefing(portfolioStatus, healthScore, enriched);
+
+    return {
+        holdings: enriched,
+        summary: {
+            holdingCount: enriched.length,
+            totalInvested: Math.round(totalInvested * 100) / 100,
+            totalValue: Math.round(totalValue * 100) / 100,
+            totalProfitLoss: Math.round(totalPL * 100) / 100,
+            totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
+        },
+        portfolioStatus, allocations, healthScore, rebalancing, dailyBriefing
+    };
+}
+
 // GET /api/portfolio/:userId — 포트폴리오 조회 (실시간 가격 + 수익률 + 상태판단)
 app.get('/api/portfolio/:userId', async (req, res) => {
     try {
-        const holdings = portfolioStore.get(req.params.userId);
-        if (!holdings.length) {
+        const snap = await buildPortfolioSnapshot(req.params.userId);
+        if (!snap) {
             return res.json({
                 holdings: [],
                 summary: { holdingCount: 0, totalInvested: 0, totalValue: 0, totalProfitLoss: 0, totalProfitLossPct: 0 },
@@ -754,83 +843,7 @@ app.get('/api/portfolio/:userId', async (req, res) => {
                 message: '보유종목이 없습니다. 종목을 추가해주세요.'
             });
         }
-
-        const enriched = [];
-        for (const h of holdings) {
-            let stockData = null, currentPrice = null, changePct = null;
-            try {
-                stockData = await fetchAllStockData(h.ticker, h.name);
-                currentPrice = stockData.price?.current ?? null;
-                changePct = stockData.price?.changePct ?? null;
-            } catch (e) {
-                console.error(`[Portfolio] ${h.ticker} 데이터 조회 실패:`, e.message);
-            }
-
-            const investedAmount = h.quantity * h.avgPrice;
-            const currentValue = currentPrice != null ? h.quantity * currentPrice : null;
-            const profitLoss = currentValue != null ? currentValue - investedAmount : null;
-            const profitLossPct = investedAmount > 0 && profitLoss != null
-                ? Math.round((profitLoss / investedAmount) * 10000) / 100
-                : null;
-
-            // 7팩터 상태 판단
-            let status = null;
-            if (stockData) {
-                status = analyzeHolding(stockData, h);
-            }
-
-            enriched.push({
-                ticker: h.ticker,
-                name: h.name,
-                quantity: h.quantity,
-                avgPrice: h.avgPrice,
-                buyDate: h.buyDate || null,
-                memo: h.memo || null,
-                currentPrice,
-                changePct,
-                investedAmount: Math.round(investedAmount * 100) / 100,
-                currentValue: currentValue != null ? Math.round(currentValue * 100) / 100 : null,
-                profitLoss: profitLoss != null ? Math.round(profitLoss * 100) / 100 : null,
-                profitLossPct,
-                status,
-                dataAsOf: new Date().toISOString(),
-            });
-            await new Promise(r => setTimeout(r, 300));
-        }
-
-        // 전체 요약
-        const totalInvested = enriched.reduce((s, h) => s + h.investedAmount, 0);
-        const totalValue = enriched.reduce((s, h) => s + (h.currentValue || h.investedAmount), 0);
-        const totalPL = totalValue - totalInvested;
-
-        enriched.forEach(h => {
-            h.weight = totalValue > 0 && h.currentValue != null
-                ? Math.round((h.currentValue / totalValue) * 10000) / 100
-                : null;
-        });
-
-        // 포트폴리오 전체 상태 요약
-        const portfolioStatus = buildPortfolioSummary(enriched);
-        const allocations = analyzeAllocation(enriched, totalValue);
-        const healthScore = calculateHealthScore(enriched, allocations, portfolioStatus);
-        const rebalancing = calculateRebalancing(allocations, healthScore, portfolioStatus);
-        const dailyBriefing = buildDailyBriefing(portfolioStatus, healthScore, enriched);
-
-        res.json({
-            holdings: enriched,
-            summary: {
-                holdingCount: enriched.length,
-                totalInvested: Math.round(totalInvested * 100) / 100,
-                totalValue: Math.round(totalValue * 100) / 100,
-                totalProfitLoss: Math.round(totalPL * 100) / 100,
-                totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
-            },
-            portfolioStatus,
-            allocations,
-            healthScore,
-            rebalancing,
-            dailyBriefing
-        });
+        res.json(snap);
     } catch (err) {
         console.error('[Portfolio GET]', err.message);
         res.status(500).json({ error: err.message });

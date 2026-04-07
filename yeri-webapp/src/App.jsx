@@ -319,11 +319,14 @@ function ChatPage({ chatId }) {
 }
 
 // ── 관심종목/알림 페이지 ──────────────────────────────────────
-function WatchlistPage({ chatId, onBadgeCountChange }) {
+function WatchlistPage({ chatId, onBadgeCountChange, onGoPortfolio }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
+
+  // 포트폴리오 요약 위젯용 상태
+  const [pfSnap, setPfSnap] = useState(null)
 
   const fetchAlerts = useCallback(async (refresh = false) => {
     if (!chatId) return
@@ -337,6 +340,12 @@ function WatchlistPage({ chatId, onBadgeCountChange }) {
       setData(json)
       setLastUpdated(Date.now())
       onBadgeCountChange?.(json.alertCount || 0)
+
+      // 포트폴리오 요약 위젯을 위한 백그라운드 갱신
+      fetch(`${API_BASE}/portfolio/${chatId}`).then(r => r.json()).then(snap => {
+        if (snap && snap.summary && snap.summary.holdingCount > 0) setPfSnap(snap)
+      }).catch(()=>{})
+      
     } catch (e) {
       setError(e.message)
     } finally {
@@ -357,6 +366,23 @@ function WatchlistPage({ chatId, onBadgeCountChange }) {
 
   return (
     <div className="main">
+      {/* 섹션: 내 포트폴리오 위젯 */}
+      {pfSnap && (
+        <div className="pf-widget-card" onClick={onGoPortfolio}>
+          <div className="pf-widget-header">
+            <span>내 포트폴리오 요약: {pfSnap.healthScore.label}</span>
+            <span className={pfSnap.summary.totalProfitLossPct >= 0 ? 'up' : 'down'}>
+              {pfSnap.summary.totalProfitLossPct >= 0 ? '+' : ''}{pfSnap.summary.totalProfitLossPct.toFixed(1)}%
+            </span>
+          </div>
+          <div className="pf-widget-body">
+            <div>🔥 강세: {pfSnap.portfolioStatus.strongTop3.map(s => s.ticker).join(', ') || '-'}</div>
+            <div>⚠️ 위험: {pfSnap.portfolioStatus.riskTop3.map(s => s.ticker).join(', ') || '-'}</div>
+          </div>
+          <div className="pf-widget-footer">포트폴리오 자세히 보기 ➔</div>
+        </div>
+      )}
+
       {/* 섹션: 알림 */}
       <div className="section-header">
         <span className="section-title">🔔 알림</span>
@@ -1109,7 +1135,7 @@ export default function App() {
 
       {/* 페이지 */}
       {page === 'watchlist' && (
-        <WatchlistPage chatId={chatId} onBadgeCountChange={setAlertCount} />
+        <WatchlistPage chatId={chatId} onBadgeCountChange={setAlertCount} onGoPortfolio={() => setPage('portfolio')} />
       )}
       {page === 'portfolio' && <PortfolioPage userId={chatId} />}
       {page === 'chat' && <ChatPage chatId={chatId} />}
