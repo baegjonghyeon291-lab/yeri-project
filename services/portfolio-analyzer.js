@@ -474,8 +474,89 @@ function analyzeAllocation(holdings, totalValue) {
     };
 }
 
+/** 포트폴리오 분산 집중도 계산 */
+function analyzeDiversification(holdings, totalValue) {
+    if (!totalValue || holdings.length === 0) return null;
+    let sectorMap = {};
+    let themeMap = {};
+    let mktCapSmall = 0, mktCapMid = 0, mktCapLarge = 0;
+    
+    let totalBetaWeight = 0;
+    let betaCount = 0;
+
+    holdings.forEach(h => {
+        const value = h.currentValue || (h.quantity * (h.currentPrice || h.avgPrice));
+        const weight = (value / totalValue) * 100;
+        
+        const sector = (h.sector && h.sector !== 'Unknown') ? h.sector : '기타';
+        sectorMap[sector] = (sectorMap[sector] || 0) + weight;
+
+        const industry = (h.industry && h.industry !== 'Unknown') ? h.industry : '기타';
+        themeMap[industry] = (themeMap[industry] || 0) + weight;
+        
+        if (h.mktCap) {
+            if (h.mktCap > 10 * 1e9) mktCapLarge += weight;
+            else if (h.mktCap > 2 * 1e9) mktCapMid += weight;
+            else mktCapSmall += weight;
+        }
+
+        if (h.beta !== null && !isNaN(h.beta)) {
+            totalBetaWeight += (parseFloat(h.beta) * weight);
+            betaCount += weight;
+        }
+    });
+
+    const avgBeta = betaCount > 0 ? (totalBetaWeight / betaCount) : 1;
+
+    let score = 100;
+    let messages = [];
+
+    // 1. 섹터 집중도 (가장 높은 섹터가 40% 이상이면 감점)
+    const sectors = Object.entries(sectorMap).map(([name, weight]) => ({ name, weight: Number(weight.toFixed(1)) })).sort((a,b) => b.weight - a.weight);
+    if (sectors.length > 0 && sectors[0].weight > 40) {
+        score -= (sectors[0].weight - 40);
+        messages.push(`특정 섹터(${sectors[0].name}) 비중이 ${sectors[0].weight}%로 변동성 노출 위험이 있습니다.`);
+    }
+
+    // 2. 종목 수 분산 (3종목 미만 시 감점)
+    if (holdings.length < 3) {
+        score -= 20;
+        messages.push(`종목 수가 적어 개별 기업 이슈에 쉽게 흔들릴 수 있습니다.`);
+    }
+
+    // 3. 변동성 (베타 > 1.5 면 위험군)
+    if (avgBeta > 1.5) {
+        score -= 10;
+        messages.push(`시장 전체 대비 변동성(Beta)이 높아 방어 성향 편입을 고려하세요.`);
+    } else if (avgBeta < 0.8 && holdings.length > 0) {
+        messages.push(`포트폴리오의 방어력이 우수합니다.`);
+    }
+
+    // 4. 소형주 비중 과다 (> 30%)
+    if (mktCapSmall > 30) {
+        score -= 10;
+        messages.push(`소형주 비중이 ${mktCapSmall.toFixed(1)}%로 다소 많아 리스크 감수에 유의하세요.`);
+    }
+
+    if (score < 0) score = 0;
+    
+    let label = '위험';
+    if (score >= 80) label = '우수';
+    else if (score >= 60) label = '양호';
+    else if (score >= 40) label = '보통';
+
+    return {
+        score: Math.round(score),
+        label,
+        messages,
+        sectors,
+        themes: Object.entries(themeMap).map(([name, weight]) => ({ name, weight: Number(weight.toFixed(1)) })).sort((a,b) => b.weight - a.weight).slice(0, 5),
+        avgBeta: Number(avgBeta.toFixed(2))
+    };
+}
+
 /** 포트폴리오 건강도 점수 */
-function calculateHealthScore(holdingsWithStatus, allocations, summary) {
+function calculateHealthScore(holdingsWithStatus, allocations, summary, diversification) {
     if (holdingsWithStatus.length === 0) return { score: 0, label: '데이터 없음', strengths: [], weaknesses: [] };
     
     let totalScore = 0;
@@ -497,6 +578,11 @@ function calculateHealthScore(holdingsWithStatus, allocations, summary) {
     const profitCount = holdingsWithStatus.filter(h => (h.profitLoss || 0) > 0).length;
     const profitScore = (profitCount / holdingsWithStatus.length) * 100;
     totalScore += profitScore * 0.2; // 수익 종목 비율 20%
+    
+    // 분산 엔진이 있다면 분산 점수 반영 (기본 분산도 대체)
+    if (diversification && diversification.score) {
+        totalScore = (avgOverall * 0.4) + (diversification.score * 0.4) + (profitScore * 0.2);
+    }
     
     const score = Math.round(totalScore);
     let label = '위험';
@@ -570,7 +656,7 @@ function buildDailyBriefing(summary, health, holdings) {
 }
 
 /** 오늘의 액션 생성 (홈 대시보드 및 브리핑용) */
-function generateTodayActions(holdingsWithStatus, health, summary) {
+function generateTodayActions(holdingsWithStatus, health, summary, diversification) {
     const actions = [];
     const pushAction = (ticker, action, reason, priority) => {
         if (!actions.find(a => a.ticker === ticker) && actions.length < 5) {
@@ -611,6 +697,16 @@ function generateTodayActions(holdingsWithStatus, health, summary) {
         pushAction(s.ticker, '추가 매수 관심', `상승 모멘텀이 매우 강력합니다. 적절한 눌림목에서 분할 매수해 볼 만합니다.`, 'LOW');
     });
 
+    // 6. 분산도 기반 액션
+    if (diversification && diversification.score < 60 && diversification.messages.length > 0) {
+        actions.push({
+            ticker: 'PORTFOLIO',
+            action: '리밸런싱 검토 (리스크 점검)',
+            reason: diversification.messages[0],
+            priority: 'HIGH'
+        });
+    }
+
     if (actions.length === 0) {
         actions.push({
             ticker: 'PORTFOLIO',
@@ -623,5 +719,5 @@ function generateTodayActions(holdingsWithStatus, health, summary) {
     return actions;
 }
 
-module.exports = { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing, calculatePriceZones, generateTodayActions };
+module.exports = { analyzeHolding, buildPortfolioSummary, analyzeAllocation, analyzeDiversification, calculateHealthScore, calculateRebalancing, buildDailyBriefing, calculatePriceZones, generateTodayActions };
 

@@ -67,7 +67,7 @@ const { generateRecommendations } = require('./services/recommendation-engine');
 const sessions = require('./services/session');
 const watchlistStore = require('./services/watchlist-store');
 const portfolioStore = require('./services/portfolio-store');
-const { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing, generateTodayActions } = require('./services/portfolio-analyzer');
+const { analyzeHolding, buildPortfolioSummary, analyzeAllocation, analyzeDiversification, calculateHealthScore, calculateRebalancing, buildDailyBriefing, generateTodayActions } = require('./services/portfolio-analyzer');
 const userSettings = require('./services/user-settings');
 const { scanWatchlist, invalidateCache } = require('./services/alert-engine');
 
@@ -827,6 +827,10 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
             currentValue: currentValue != null ? Math.round(currentValue * 100) / 100 : null,
             profitLoss: profitLoss != null ? Math.round(profitLoss * 100) / 100 : null,
             profitLossPct, status, dataAsOf: new Date().toISOString(),
+            sector: stockData?.fundamentals?.sector || 'Unknown',
+            industry: stockData?.fundamentals?.industry || 'Unknown',
+            mktCap: stockData?.fundamentals?.mktCap || null,
+            beta: stockData?.fundamentals?.beta || null,
         });
         await new Promise(r => setTimeout(r, 200));
     }
@@ -843,10 +847,11 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
 
     const portfolioStatus = buildPortfolioSummary(enriched);
     const allocations = analyzeAllocation(enriched, totalValue);
-    const healthScore = calculateHealthScore(enriched, allocations, portfolioStatus);
+    const diversification = analyzeDiversification(enriched, totalValue);
+    const healthScore = calculateHealthScore(enriched, allocations, portfolioStatus, diversification);
     const rebalancing = calculateRebalancing(allocations, healthScore, portfolioStatus);
     const dailyBriefing = buildDailyBriefing(portfolioStatus, healthScore, enriched);
-    const todayActions = generateTodayActions(enriched, healthScore, portfolioStatus);
+    const todayActions = generateTodayActions(enriched, healthScore, portfolioStatus, diversification);
 
     return {
         holdings: enriched,
@@ -857,7 +862,7 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
             totalProfitLoss: Math.round(totalPL * 100) / 100,
             totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
         },
-        portfolioStatus, allocations, healthScore, rebalancing, dailyBriefing, todayActions
+        portfolioStatus, allocations, diversification, healthScore, rebalancing, dailyBriefing, todayActions
     };
 }
 
