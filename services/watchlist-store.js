@@ -7,7 +7,7 @@
 const fs   = require('fs');
 const path = require('path');
 
-const DATA_DIR   = path.join(__dirname, '..', 'data');
+const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const STORE_FILE = path.join(DATA_DIR, 'watchlist.json');
 const MAX_WATCHLIST = parseInt(process.env.MAX_WATCHLIST || '10', 10);
 
