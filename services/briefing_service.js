@@ -60,6 +60,12 @@ function extractStockSummary(data) {
 // 종목 데이터 블록 문자열 생성
 // ─────────────────────────────────────────────
 function buildStockBlock(s) {
+    if (!s.hasData) {
+        return `
+[${s.name} (${s.ticker})]
+⚠️ 해당 종목의 기초 데이터를 수집할 수 없습니다 (비주류 종목 또는 거래소 지연).`.trim();
+    }
+    
     return `
 [${s.name} (${s.ticker})]
 현재가: ${s.price} | 전일비: ${s.changePct} | 거래량: ${s.volume}
