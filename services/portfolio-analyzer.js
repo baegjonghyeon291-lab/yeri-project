@@ -322,7 +322,7 @@ function analyzeHolding(stockData, holding) {
 
     // 전략 문구 선택
     const templates = STRATEGY_TEMPLATES[badgeInfo.badge] || STRATEGY_TEMPLATES['보통'];
-    const strategy = templates[Math.floor(Math.random() * templates.length)];
+    let strategy = templates[Math.floor(Math.random() * templates.length)];
 
     // 보유 손익 반영 기민한 문구 수정
     let profitNote = '';
@@ -332,8 +332,9 @@ function analyzeHolding(stockData, holding) {
         
         if (pnlPct > 20 && (badgeInfo.badge === '주의' || badgeInfo.badge === '경고' || badgeInfo.badge === '리스크 높음')) {
             // 큰 수익 중인데 상태가 악화되는 경우
-            strategy = '단기 하락/추세 훼손 신호가 발생했습니다. 수익이 큰 상태이므로 일부 이익 실현(수익 보호)을 우선적으로 검토하는 것이 유리할 수 있습니다.';
+            strategy = '단기 하락 추세가 뚜렷해 수익 보호를 위한 일부 익절/비중 축소 검토가 필요합니다.';
             profitNote = '';
+            reasons.unshift('비중 과다 및 추세 약화');
         } else {
             if (pnlPct > 30 && badgeInfo.badge !== '경고' && badgeInfo.badge !== '리스크 높음') {
                 profitNote = ' (수익률이 높아 수익 실현 전략도 고려 가능)';
