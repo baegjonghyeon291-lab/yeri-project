@@ -72,6 +72,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ─── 공용 툴: 디버깅 로거 (최대 200개) ─────────────────────────────
+const logBuffer = [];
+function logDebug(msg) {
+    const line = `[${new Date().toISOString()}] ${msg}`;
+    console.log(line);
+    logBuffer.push(line);
+    if (logBuffer.length > 200) logBuffer.shift();
+}
+
+app.get('/api/debug/logs', (req, res) => {
+    res.send(logBuffer.join('\n'));
+});
+
 // ── 정적 파일 서빙 (웹앱 프론트엔드) ──────────────────────────────
 const webappDist = path.join(__dirname, 'yeri-webapp', 'dist');
 
@@ -191,7 +204,7 @@ app.post('/api/chat', async (req, res) => {
         
         if (intent.type === 'portfolio' || isPortfolioKeyword) {
             const targetUserId = req.body.chatId || 'webapp';
-            console.log(`[API /chat] ▶ Portfolio intent 매칭 - 검색에 사용된 세션키(chatId): [${targetUserId}]`);
+            logDebug(`[API /chat] Portfolio intent 매칭 - req.body.chatId: [${req.body.chatId}] -> targetUserId: [${targetUserId}]`);
             const snap = await buildPortfolioSnapshot(targetUserId);
 
             if (!snap) {
@@ -833,7 +846,7 @@ async function buildPortfolioSnapshot(userId) {
 
 // GET /api/portfolio/:userId — 포트폴리오 조회 (실시간 가격 + 수익률 + 상태판단)
 app.get('/api/portfolio/:userId', async (req, res) => {
-    console.log(`[API /portfolio/GET] ▶ 포트폴리오 조회 요청 수신됨 - 조회에 사용된 세션키(userId): [${req.params.userId}]`);
+    logDebug(`[API /portfolio/GET] 포트폴리오 조회 - req.params.userId: [${req.params.userId}]`);
     try {
         const snap = await buildPortfolioSnapshot(req.params.userId);
         if (!snap) {
@@ -853,7 +866,7 @@ app.get('/api/portfolio/:userId', async (req, res) => {
 
 // POST /api/portfolio/:userId/add — 종목 추가
 app.post('/api/portfolio/:userId/add', (req, res) => {
-    console.log(`[API /portfolio/add] ▶ 종목 추가 요청 수신됨 - 저장에 사용된 세션키(userId): [${req.params.userId}]`);
+    logDebug(`[API /portfolio/add] 종목 추가 - req.params.userId: [${req.params.userId}], body: ${JSON.stringify(req.body)}`);
     const { ticker, name, quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts } = req.body;
     if (!ticker || !quantity || !avgPrice) {
         return res.status(400).json({ error: 'ticker, quantity, avgPrice are required' });
