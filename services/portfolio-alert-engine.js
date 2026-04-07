@@ -15,17 +15,16 @@ function safeNum(val) {
 function evaluatePortfolioAlerts(userId, analyzedHoldings) {
     if (!analyzedHoldings || !Array.isArray(analyzedHoldings)) return;
 
-    analyzedHoldings.forEach(result => {
-        const holding = result.holding; // 원본 종목 정보
+    analyzedHoldings.forEach(holding => {
         const alerts = holding.alerts; 
         
         if (!alerts || !alerts.enabled) return;
 
         const ticker = holding.ticker;
-        const currentPrice = safeNum(result.price?.current);
+        const currentPrice = safeNum(holding.currentPrice);
         const avgPrice = safeNum(holding.avgPrice);
-        const badge = result.status?.badge;
-        const weightPct = safeNum(result.portfolioWeightPct);
+        const badge = holding.status?.badge;
+        const weightPct = safeNum(holding.weight);
 
         if (currentPrice == null || avgPrice == null) return;
 

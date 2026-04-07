@@ -820,7 +820,7 @@ async function buildPortfolioSnapshot(userId) {
 
         enriched.push({
             ticker: h.ticker, name: h.name, quantity: h.quantity, avgPrice: h.avgPrice,
-            buyDate: h.buyDate || null, memo: h.memo || null,
+            buyDate: h.buyDate || null, memo: h.memo || null, alerts: h.alerts,
             currentPrice, changePct,
             investedAmount: Math.round(investedAmount * 100) / 100,
             currentValue: currentValue != null ? Math.round(currentValue * 100) / 100 : null,
