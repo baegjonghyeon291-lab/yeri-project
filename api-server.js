@@ -7,6 +7,9 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true });
 
+const { evaluatePortfolioAlerts } = require('./services/portfolio-alert-engine');
+const { getNotifications, markAsRead, markAllAsRead } = require('./services/notification-store');
+
 // ── 필수 환경변수 검증 (Render 배포 실패 방지) ─────────────────────
 const REQUIRED_ENV = ['OPENAI_API_KEY'];
 const MISSING_ENV = REQUIRED_ENV.filter(k => !process.env[k]);
@@ -869,9 +872,37 @@ app.get('/api/portfolio/:userId', async (req, res) => {
                 message: '보유종목이 없습니다. 종목을 추가해주세요.'
             });
         }
+        
+        // 포트폴리오 로드 시 사용자 조건 기반 알림을 평가하여 DB에 자동 적재
+        evaluatePortfolioAlerts(req.params.userId, snap.holdings);
+        
         res.json(snap);
     } catch (err) {
         console.error('[Portfolio GET]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ==== [신규] 포트폴리오 알림 라우트 ====
+app.get('/api/notifications/:userId', (req, res) => {
+    try {
+        const ns = getNotifications(req.params.userId);
+        res.json({ notifications: ns });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/notifications/:userId/read', (req, res) => {
+    try {
+        const { notificationId } = req.body;
+        if (notificationId === 'all') {
+            markAllAsRead(req.params.userId);
+            return res.json({ success: true });
+        }
+        const success = markAsRead(req.params.userId, notificationId);
+        res.json({ success });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
