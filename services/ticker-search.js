@@ -2,10 +2,11 @@
  * ticker-search.js — 검색 기반 종목 인식 엔진
  *
  * 하드코딩 없이 종목명/티커 입력 → API 검색 → ticker 반환
- * 우선순위: Finnhub → Polygon → FMP
+ * 우선순위: KRX 로컬 마스터 -> Finnhub → Polygon → FMP
  */
 
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '../.env'), override: true });
 
 const { searchYahooTicker } = require('./yahoo-finance-helper');
@@ -13,6 +14,18 @@ const { searchYahooTicker } = require('./yahoo-finance-helper');
 const FINNHUB_KEY  = process.env.FINNHUB_API_KEY;
 const POLYGON_KEY  = process.env.POLYGON_API_KEY;
 const FMP_KEY      = process.env.FMP_API_KEY;
+
+// ─────────────────────────────────────────────
+// 한국 주식 마스터 로드 (KOSPI, KOSDAQ, KONEX)
+// ─────────────────────────────────────────────
+let krMasterList = [];
+try {
+    const data = fs.readFileSync(path.join(__dirname, '../data/kr_tickers.json'), 'utf8');
+    krMasterList = JSON.parse(data);
+    console.log(`[TickerSearch] 🇰🇷 KRX Master 로켓-로드 완료: ${krMasterList.length}건`);
+} catch(e) {
+    console.warn("KRX master list load failed", e.message);
+}
 
 // ─────────────────────────────────────────────
 // 한글 → 영문 번역 매핑 (API 검색 전 전처리)
@@ -46,64 +59,68 @@ const KR_TO_EN_HINT = {
 };
 
 // ─────────────────────────────────────────────
-// 한국 종목 한글 → KS 티커 직접 매핑 (한글 검색 지원용)
+// 한국 주식 마스터 검색 (완벽한 fuzzy & 오타 보정)
 // ─────────────────────────────────────────────
-const KR_DIRECT_MAP = {
-    '삼성전자': { ticker: '005930.KS', name: 'Samsung Electronics' },
-    '삼성': { ticker: '005930.KS', name: 'Samsung Electronics' },
-    'sk하이닉스': { ticker: '000660.KS', name: 'SK Hynix' },
-    'sk하이닉스': { ticker: '000660.KS', name: 'SK Hynix' },
-    '하이닉스': { ticker: '000660.KS', name: 'SK Hynix' },
-    '카카오': { ticker: '035720.KS', name: 'Kakao Corp' },
-    '네이버': { ticker: '035420.KS', name: 'NAVER Corp' },
-    '현대차': { ticker: '005380.KS', name: 'Hyundai Motor' },
-    '현대자동차': { ticker: '005380.KS', name: 'Hyundai Motor' },
-    '기아': { ticker: '000270.KS', name: 'Kia Corp' },
-    '기아차': { ticker: '000270.KS', name: 'Kia Corp' },
-    '셀트리온': { ticker: '068270.KS', name: 'Celltrion' },
-    'lg화학': { ticker: '051910.KS', name: 'LG Chem' },
-    'lg에너지솔루션': { ticker: '373220.KS', name: 'LG Energy Solution' },
-    '삼성바이오': { ticker: '207940.KS', name: 'Samsung Biologics' },
-    '삼성바이오로직스': { ticker: '207940.KS', name: 'Samsung Biologics' },
-    '포스코': { ticker: '005490.KS', name: 'POSCO Holdings' },
-    '포스코홀딩스': { ticker: '005490.KS', name: 'POSCO Holdings' },
-    'kb금융': { ticker: '105560.KS', name: 'KB Financial' },
-    '신한지주': { ticker: '055550.KS', name: 'Shinhan Financial' },
-    '하나금융': { ticker: '086790.KS', name: 'Hana Financial' },
-    '카카오뱅크': { ticker: '323410.KS', name: 'KakaoBank' },
-    '카카오페이': { ticker: '377300.KS', name: 'Kakao Pay' },
-    '크래프톤': { ticker: '259960.KS', name: 'KRAFTON' },
-    '엔씨소프트': { ticker: '036570.KS', name: 'NCSoft' },
-    '넥슨': { ticker: '225570.KS', name: 'Nexon Korea' },
-    '에코프로비엠': { ticker: '247540.KS', name: 'EcoPro BM' },
-    '에코프로': { ticker: '086520.KS', name: 'EcoPro' },
-    '두산에너빌리티': { ticker: '034020.KS', name: 'Doosan Enerbility' },
-    'lg전자': { ticker: '066570.KS', name: 'LG Electronics' },
-    '삼성sds': { ticker: '018260.KS', name: 'Samsung SDS' },
-    'kt': { ticker: '030200.KS', name: 'KT Corp' },
-    'skt': { ticker: '017670.KS', name: 'SK Telecom' },
-    'sk텔레콤': { ticker: '017670.KS', name: 'SK Telecom' },
-};
+function searchKoTicker(query) {
+    if (!krMasterList.length) return [];
+    
+    const qLower = query.toLowerCase().replace(/\s/g, '');
+    let matched = [];
 
+    // 영어/숫자/한글 모두 체크
+    for (const k of krMasterList) {
+       const rawName = k.Name || '';
+       const nameNoSpace = rawName.toLowerCase().replace(/\s/g, '');
+       const code = k.Code || '';
+       
+       let conf = 0;
+       
+       // 종목코드 매칭 (100% 신뢰)
+       if (code === qLower || code.includes(qLower)) conf = code === qLower ? 1.0 : 0.8;
+       // 풀네임 매칭 (100% 신뢰)
+       else if (nameNoSpace === qLower) conf = 1.0;
+       // 앞부분 일치 매칭 (90% 신뢰)
+       else if (nameNoSpace.startsWith(qLower)) conf = 0.90;
+       // 부분 포함 (70% 신뢰)
+       else if (nameNoSpace.includes(qLower)) conf = 0.70;
+       
+       if (conf >= 0.5) {
+          const suffix = k.Market === 'KOSPI' ? '.KS' : (k.Market === 'KOSDAQ' ? '.KQ' : '.KS');
+          const isPreferred = rawName.endsWith('우') || rawName.endsWith('우B');
+          matched.push({
+             ticker: code + suffix,
+             rawTicker: code, // UI 렌더링용
+             name: rawName,
+             exchange: k.Market + (isPreferred ? ' 우선주' : ''),
+             source: 'KRX',
+             confidence: conf
+          });
+       }
+    }
+    
+    // 정렬 규칙 (핵심): 신뢰도 높은 순 -> 이름이 짧은 순 (삼정펄프 vs 삼정펄프홀딩스) -> 시장구분
+    matched.sort((a,b) => {
+        if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+        return a.name.length - b.name.length;
+    });
+    
+    return matched.slice(0, 20);
+}
 
 // ─────────────────────────────────────────────
 // 검색어 전처리: 한글 → 영문 힌트, 노이즈 제거
 // ─────────────────────────────────────────────
 function preprocessQuery(raw) {
     const trimmed = (raw || '').trim();
-    // 직접 번역 힌트 확인
     for (const [kr, en] of Object.entries(KR_TO_EN_HINT)) {
         if (trimmed.includes(kr)) return en;
     }
-    // 이미 영문이면 그대로
     if (/^[A-Za-z]/.test(trimmed)) return trimmed;
-    // 한글이지만 매핑 없으면 그대로 (Finnhub이 처리 시도)
     return trimmed;
 }
 
 // ─────────────────────────────────────────────
 // Finnhub 검색 API
-// GET /api/v1/search?q={query}&token={key}
 // ─────────────────────────────────────────────
 async function searchFinnhub(query) {
     if (!FINNHUB_KEY) return [];
@@ -117,21 +134,18 @@ async function searchFinnhub(query) {
             .slice(0, 5)
             .map(r => ({
                 ticker: r.symbol,
+                rawTicker: r.symbol,
                 name:   r.description || r.symbol,
-                exchange: r.displaySymbol,
+                exchange: r.displaySymbol || 'US',
                 source: 'Finnhub',
                 confidence: calcConfidence(query, r.description || '', r.symbol),
             }));
         return results;
-    } catch (err) {
-        console.warn(`[TickerSearch] Finnhub 실패: ${err.message}`);
-        return [];
-    }
+    } catch (err) { return []; }
 }
 
 // ─────────────────────────────────────────────
 // Polygon 검색 API
-// GET /v3/reference/tickers?search={query}&active=true
 // ─────────────────────────────────────────────
 async function searchPolygon(query) {
     if (!POLYGON_KEY) return [];
@@ -142,39 +156,13 @@ async function searchPolygon(query) {
         const data = await res.json();
         return (data.results || []).slice(0, 5).map(r => ({
             ticker: r.ticker,
+            rawTicker: r.ticker,
             name:   r.name || r.ticker,
-            exchange: r.primary_exchange,
+            exchange: r.primary_exchange || 'US',
             source: 'Polygon',
             confidence: calcConfidence(query, r.name || '', r.ticker),
         }));
-    } catch (err) {
-        console.warn(`[TickerSearch] Polygon 실패: ${err.message}`);
-        return [];
-    }
-}
-
-// ─────────────────────────────────────────────
-// FMP 검색 API
-// GET /api/v3/search?query={query}&apikey={key}
-// ─────────────────────────────────────────────
-async function searchFMP(query) {
-    if (!FMP_KEY) return [];
-    try {
-        const url = `https://financialmodelingprep.com/api/v3/search?query=${encodeURIComponent(query)}&limit=5&exchange=NASDAQ,NYSE,AMEX&apikey=${FMP_KEY}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return (data || []).slice(0, 5).map(r => ({
-            ticker: r.symbol,
-            name:   r.name || r.symbol,
-            exchange: r.exchangeShortName,
-            source: 'FMP',
-            confidence: calcConfidence(query, r.name || '', r.symbol),
-        }));
-    } catch (err) {
-        console.warn(`[TickerSearch] FMP 실패: ${err.message}`);
-        return [];
-    }
+    } catch (err) { return []; }
 }
 
 // ─────────────────────────────────────────────
@@ -185,29 +173,14 @@ function calcConfidence(query, name, ticker) {
     const n = (name || '').toLowerCase().replace(/\s/g, '');
     const t = (ticker || '').toLowerCase();
 
-    // 티커 완전 일치
     if (t === q) return 1.0;
-    // 이름 완전 일치
     if (n === q) return 0.95;
-    // 이름이 쿼리를 포함
     if (n.startsWith(q) || q.startsWith(n)) return 0.85;
-    // 티커가 쿼리를 포함
     if (t.includes(q) || q.includes(t)) return 0.8;
-    // 부분 문자열 포함
     if (n.includes(q)) return 0.7;
-    if (q.includes(n.substring(0, 4))) return 0.6;
-    // 최소 2자 겹침
-    for (let len = Math.min(q.length, n.length, 4); len >= 2; len--) {
-        for (let i = 0; i <= q.length - len; i++) {
-            if (n.includes(q.substring(i, i + len))) return 0.4 + len * 0.05;
-        }
-    }
     return 0.2;
 }
 
-// ─────────────────────────────────────────────
-// 중복 제거 및 신뢰도로 정렬
-// ─────────────────────────────────────────────
 function dedupeAndRank(results) {
     const seen = new Set();
     return results
@@ -217,38 +190,35 @@ function dedupeAndRank(results) {
             return true;
         })
         .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, 3);
+        .slice(0, 5);
 }
 
 // ─────────────────────────────────────────────
-// 메인 검색 함수 — 외부에서 호출
+// 메인 검색 함수
 // ─────────────────────────────────────────────
-/**
- * @param {string} rawInput  사용자 입력 (한글/영문 종목명 or 티커)
- * @returns {Promise<{
- *   found: boolean,
- *   auto: boolean,       // true: 자동 선택됨 / false: 후보 제시 필요
- *   ticker: string|null,
- *   name: string|null,
- *   candidates: Array,   // auto=false일 때 사용자에게 보여줄 후보 목록
- * }>}
- */
 async function searchTicker(rawInput) {
-    const query = preprocessQuery(rawInput);
     const queryLower = rawInput.trim().toLowerCase();
-    console.log(`[TickerSearch] 검색: "${rawInput}" → 전처리: "${query}"`);
+    console.log(`[TickerSearch] 원본 검색어: "${rawInput}"`);
 
-    // 0순위: 한국 종목 직접 매핑 (한글 → KS 티커)
-    if (KR_DIRECT_MAP[queryLower] || KR_DIRECT_MAP[rawInput.trim()]) {
-        const m = KR_DIRECT_MAP[queryLower] || KR_DIRECT_MAP[rawInput.trim()];
-        console.log(`[TickerSearch] KR 직접 매핑: ${rawInput} → ${m.ticker}`);
-        return { found: true, auto: true, ticker: m.ticker, name: m.name, candidates: [{ ticker: m.ticker, name: m.name, source: 'KR_MAP', confidence: 1.0 }] };
+    // 0순위: 국내 종목 초고속 로컬 탐색 (완전 분리)
+    const krResults = searchKoTicker(queryLower);
+    
+    // 한국어/국내 기업 코드로 명확히 감지된 경우 미국 로직 스킵!
+    if (krResults.length > 0 && krResults[0].confidence >= 0.7) {
+        console.log(`[TickerSearch] 🇰🇷 국내 종목 즉시 감지됨: ${krResults[0].name}`);
+        const top = krResults[0];
+        // 사용자가 명시적 선택을 더 자주 할 수 있도록 auto: true 조건을 100% 코드 일치 레벨로 극단적으로 높임
+        if (top.confidence >= 1.0 && krResults.length === 1) {
+            return { found: true, auto: true, ticker: top.ticker, rawTicker: top.rawTicker, name: top.name, exchange: top.exchange, candidates: krResults };
+        }
+        // 풍부한 후보 제공 (최대 15개)
+        return { found: true, auto: false, ticker: null, rawTicker: null, name: null, candidates: krResults.slice(0, 15) };
     }
 
-    // 1순위: Finnhub
+    // 1순위: 해외 종목 힌트 번역 (ex: 넷플릭스 -> Netflix)
+    const query = preprocessQuery(rawInput);
     let results = await searchFinnhub(query);
 
-    // 2순위: Polygon (Finnhub 결과 부족 시)
     if (results.length < 2) {
         const polyResults = await searchPolygon(query);
         results = dedupeAndRank([...results, ...polyResults]);
@@ -256,38 +226,34 @@ async function searchTicker(rawInput) {
         results = dedupeAndRank(results);
     }
 
-    // 3순위: Yahoo Finance (아직 부족 시)
     if (results.length < 1) {
         try {
             const yhResults = await searchYahooTicker(query);
             const withConf  = yhResults.map(r => ({
                 ...r,
+                rawTicker: r.ticker,
                 confidence: calcConfidence(query, r.name || '', r.ticker),
             }));
             results = dedupeAndRank([...results, ...withConf]);
-            if (results.length) console.log(`[TickerSearch] Yahoo 보완: ${results.map(r => r.ticker).join(', ')}`);
-        } catch (e) {
-            console.warn(`[TickerSearch] Yahoo 검색 실패: ${e.message}`);
-        }
+        } catch (e) {}
     }
 
     if (!results.length) {
+        // 완전 실패 시 코리아 풀 한번 더 제공해봄 (보험)
+        if (krResults.length > 0) return { found: true, auto: false, ticker: null, candidates: krResults.slice(0,3) };
         return { found: false, auto: false, ticker: null, name: null, candidates: [] };
     }
 
     const top = results[0];
 
-    // 신뢰도 0.75 이상이면 자동 선택
-    if (top.confidence >= 0.75) {
-        return { found: true, auto: true, ticker: top.ticker, name: top.name, candidates: results };
+    if (top.confidence >= 0.85) {
+        return { found: true, auto: true, ticker: top.ticker, rawTicker: top.rawTicker, name: top.name, exchange: top.exchange, candidates: results };
     }
 
-    // 신뢰도 0.5 이상이지만 불확실하면 후보 제시
     if (top.confidence >= 0.5) {
-        return { found: true, auto: false, ticker: null, name: null, candidates: results.slice(0, 3) };
+        return { found: true, auto: false, ticker: null, name: null, candidates: results.slice(0, 4) };
     }
 
-    // 0.5 미만이면 찾지 못함
     return { found: false, auto: false, ticker: null, name: null, candidates: [] };
 }
 

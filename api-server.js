@@ -840,14 +840,30 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
         await new Promise(r => setTimeout(r, 200));
     }
 
-    const totalInvested = enriched.reduce((s, h) => s + h.investedAmount, 0);
-    const totalValue = enriched.reduce((s, h) => s + (h.currentValue || h.investedAmount), 0);
+    const USD_KRW_RATE = 1400; // 정적 환율 방어 기준
+    let hasKRW = false;
+    enriched.forEach(h => {
+        if (h.ticker.endsWith('.KS') || h.ticker.endsWith('.KQ')) hasKRW = true;
+    });
+
+    const displayCurrency = hasKRW ? 'KRW' : 'USD';
+    const normalize = (amount, ticker) => {
+        if (!amount) return 0;
+        const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+        if (displayCurrency === 'KRW' && !isKR) return amount * USD_KRW_RATE;
+        if (displayCurrency === 'USD' && isKR) return amount / USD_KRW_RATE;
+        return amount;
+    };
+
+    const totalInvested = enriched.reduce((s, h) => s + normalize(h.investedAmount, h.ticker), 0);
+    const totalValue = enriched.reduce((s, h) => s + normalize((h.currentValue || h.investedAmount), h.ticker), 0);
     const totalPL = totalValue - totalInvested;
-    const totalAnnualDividend = enriched.reduce((s, h) => s + ((h.quantity * (h.dividend?.rate || 0)) || 0), 0);
+    const totalAnnualDividend = enriched.reduce((s, h) => s + normalize(((h.quantity * (h.dividend?.rate || 0)) || 0), h.ticker), 0);
 
     enriched.forEach(h => {
-        h.weight = totalValue > 0 && h.currentValue != null
-            ? Math.round((h.currentValue / totalValue) * 10000) / 100
+        const normVal = normalize((h.currentValue || h.investedAmount), h.ticker);
+        h.weight = totalValue > 0 && normVal != null
+            ? Math.round((normVal / totalValue) * 10000) / 100
             : null;
     });
 
@@ -863,11 +879,12 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
         holdings: enriched,
         summary: {
             holdingCount: enriched.length,
-            totalInvested: Math.round(totalInvested * 100) / 100,
-            totalValue: Math.round(totalValue * 100) / 100,
-            totalProfitLoss: Math.round(totalPL * 100) / 100,
+            uiCurrency: displayCurrency === 'KRW' ? '₩' : '$',
+            totalInvested: Math.round(totalInvested),
+            totalValue: Math.round(totalValue),
+            totalProfitLoss: Math.round(totalPL),
             totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
-            totalAnnualDividend: Math.round(totalAnnualDividend * 100) / 100,
+            totalAnnualDividend: Math.round(totalAnnualDividend),
             dividendYieldPct: totalInvested > 0 ? Math.round((totalAnnualDividend / totalInvested) * 10000) / 100 : 0
         },
         portfolioStatus, allocations, diversification, healthScore, rebalancing, dailyBriefing, todayActions

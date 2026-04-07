@@ -141,7 +141,17 @@ async function getPriceData(ticker) {
     const cached = fromCache(cacheKey);
     if (cached) return cached;
 
-    const data = await withFallback('Price', [
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+
+    if (isKR) {
+        const data = await withFallback('PriceKR', [
+            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooPrice(ticker)]
+        ]);
+        if (data) toCache(cacheKey, data);
+        return data;
+    }
+
+    const data = await withFallback('PriceUS', [
         ['TwelveData', async () => {
             const key = process.env.TWELVEDATA_API_KEY;
             if (!key) return null;
@@ -219,7 +229,17 @@ async function getPriceHistory(ticker) {
     const cached = fromCache(cacheKey);
     if (cached) return cached;
 
-    const data = await withFallback('History', [
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+
+    if (isKR) {
+        const data = await withFallback('HistoryKR', [
+            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooHistory(ticker, 90)]
+        ]);
+        if (data) toCache(cacheKey, data);
+        return data;
+    }
+
+    const data = await withFallback('HistoryUS', [
         ['TwelveData', async () => {
             const key = process.env.TWELVEDATA_API_KEY;
             if (!key) return null;

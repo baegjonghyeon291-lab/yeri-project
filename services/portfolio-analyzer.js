@@ -284,6 +284,17 @@ const STRATEGY_TEMPLATES = {
  * @returns { scores, overall, badge, emoji, action, strategy, reasons }
  */
 function analyzeHolding(stockData, holding) {
+    if (!stockData || stockData.price?.current == null) {
+        return {
+            overall: null,
+            badge: '조회 대기',
+            emoji: '⏳',
+            action: 'HOLD',
+            strategy: '실시간 시세를 대기 중이므로 포지셔닝 분석을 일시 보류합니다.',
+            reasons: ['시장 데이터 지연'],
+            scores: null
+        };
+    }
     const trend      = scoreTrend(stockData);
     const momentum   = scoreMomentum(stockData);
     const financial  = scoreFinancial(stockData);

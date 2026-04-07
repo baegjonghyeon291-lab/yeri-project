@@ -211,11 +211,11 @@ function ChatPage({ chatId }) {
             <div className={`chat-bubble ${m.role === 'user' ? 'user' : 'bot'}`}>
               {m.text}
               {m.type === 'candidates' && m.candidates && (() => {
-                const cands = m.candidates.slice(0, 3)
+                const cands = m.candidates;
                 const bestConf = Math.max(...cands.map(c => c.confidence))
                 const bestIdx = cands.findIndex(c => c.confidence === bestConf)
                 return (
-                  <div className="candidate-buttons">
+                  <div className="candidate-buttons" style={{ maxHeight: '45vh', overflowY: 'auto', paddingRight: '4px', display: 'flex', flexDirection: 'column' }}>
                     {cands.map((c, j) => (
                       <button
                         key={j}
@@ -224,11 +224,11 @@ function ChatPage({ chatId }) {
                         disabled={loading || selectedCandidate != null}
                       >
                         {j === bestIdx && <span className="candidate-badge">👉 가장 유력</span>}
-                        <div className="candidate-main">
-                          <span className="candidate-ticker">{c.ticker}</span>
-                          <span className="candidate-name">
-                            - {c.name}{c.desc ? ` (${truncDesc(c.desc)})` : ''}
-                            {c.price != null ? ` / ${c.ticker.endsWith('.KS') || c.ticker.endsWith('.KQ') ? '₩' : '$'}${c.price.toLocaleString()} / ${c.changePct > 0 ? '+' : ''}${c.changePct?.toFixed(2)}%` : ' / 가격 정보 없음'}
+                        <div className="candidate-main" style={{ whiteSpace: 'normal', wordBreak: 'keep-all', textAlign: 'left', flex: 1 }}>
+                          <span className="candidate-ticker" style={{ display: 'block', marginBottom: '4px', lineHeight: 1.3 }}>{c.rawTicker || c.ticker.split('.')[0]} | {c.name} | {c.exchange}</span>
+                          <span className="candidate-name" style={{ display: 'block', fontSize: '0.85em', color: 'var(--text-sub)' }}>
+                            {c.desc ? `(${truncDesc(c.desc)}) ` : ''}
+                            {c.price != null ? `${c.ticker.endsWith('.KS') || c.ticker.endsWith('.KQ') ? '₩' : '$'}${c.price.toLocaleString()} (${c.changePct > 0 ? '+' : ''}${c.changePct?.toFixed(2)}%)` : '가격 정보 대기 중'}
                           </span>
                         </div>
                         <span className="candidate-conf">{Math.round(c.confidence * 100)}% 유사</span>
@@ -720,16 +720,16 @@ function PortfolioPage({ userId }) {
           <div className="pf-summary-grid">
             <div className="pf-summary-item">
               <div className="pf-summary-label">총 투자금</div>
-              <div className="pf-summary-value">${summary.totalInvested?.toLocaleString()}</div>
+              <div className="pf-summary-value">{summary.uiCurrency || '$'}{summary.totalInvested?.toLocaleString()}</div>
             </div>
             <div className="pf-summary-item">
               <div className="pf-summary-label">총 평가액</div>
-              <div className="pf-summary-value">${summary.totalValue?.toLocaleString()}</div>
+              <div className="pf-summary-value">{summary.uiCurrency || '$'}{summary.totalValue?.toLocaleString()}</div>
             </div>
             <div className="pf-summary-item pf-summary-pl">
               <div className="pf-summary-label">총 평가손익</div>
               <div className={`pf-summary-value pf-${plClass}`}>
-                {plSign}${Math.abs(summary.totalProfitLoss || 0).toLocaleString()}
+                {plSign}{summary.uiCurrency || '$'}{Math.abs(summary.totalProfitLoss || 0).toLocaleString()}
                 <span className="pf-pct">({plSign}{summary.totalProfitLossPct || 0}%)</span>
               </div>
             </div>
@@ -866,7 +866,7 @@ function PortfolioPage({ userId }) {
                 {/* 가격 및 손익 */}
                 <div className="pf-holding-price-row">
                   <span className="pf-holding-price">
-                    {h.currentPrice != null ? `$${Number(h.currentPrice).toLocaleString()}` : 'N/A'}
+                    {h.currentPrice != null ? `${h.ticker.endsWith('.KS') || h.ticker.endsWith('.KQ') ? '₩' : '$'}${Number(h.currentPrice).toLocaleString()}` : 'N/A'}
                   </span>
                   {h.changePct != null && (
                     <span className={`stock-change ${h.changePct >= 0 ? 'up' : 'down'}`}>
@@ -878,16 +878,16 @@ function PortfolioPage({ userId }) {
                 <div className="pf-holding-details">
                   <div className="pf-detail-row">
                     <span className="pf-detail-label">평단가</span>
-                    <span className="pf-detail-value">${Number(h.avgPrice).toLocaleString()}</span>
+                    <span className="pf-detail-value">{h.ticker?.endsWith('.KS') || h.ticker?.endsWith('.KQ') ? '₩' : '$'}{Number(h.avgPrice).toLocaleString()}</span>
                   </div>
                   <div className="pf-detail-row">
                     <span className="pf-detail-label">수량 / 투자금</span>
-                    <span className="pf-detail-value">{h.quantity}주 / ${Number(h.investedAmount || 0).toLocaleString()}</span>
+                    <span className="pf-detail-value">{h.quantity}주 / {h.ticker?.endsWith('.KS') || h.ticker?.endsWith('.KQ') ? '₩' : '$'}{Number(h.investedAmount || 0).toLocaleString()}</span>
                   </div>
                   <div className="pf-detail-row pf-detail-pl">
                     <span className="pf-detail-label">평가손익</span>
                     <span className={`pf-detail-value pf-${hPlClass}`}>
-                      {hPlSign}${Math.abs(h.profitLoss || 0).toLocaleString()} ({hPlSign}{h.profitLossPct || 0}%)
+                      {hPlSign}{h.ticker?.endsWith('.KS') || h.ticker?.endsWith('.KQ') ? '₩' : '$'}{Math.abs(h.profitLoss || 0).toLocaleString()} ({hPlSign}{h.profitLossPct || 0}%)
                     </span>
                   </div>
                   {h.weight != null && (
@@ -927,8 +927,8 @@ function PortfolioPage({ userId }) {
                 {(h.memo || h.tradeReason || h.targetPrice || h.lossPrice) && (
                   <div className="pf-journal">
                     {h.viewTerm && <span className="pf-journal-term">[{h.viewTerm}]</span>}
-                    {h.targetPrice && <span className="pf-journal-tgt">목표 ${h.targetPrice}</span>}
-                    {h.lossPrice && <span className="pf-journal-loss">손절 ${h.lossPrice}</span>}
+                    {h.targetPrice && <span className="pf-journal-tgt">목표 {h.ticker?.endsWith('.KS') || h.ticker?.endsWith('.KQ') ? '₩' : '$'}{h.targetPrice}</span>}
+                    {h.lossPrice && <span className="pf-journal-loss">손절 {h.ticker?.endsWith('.KS') || h.ticker?.endsWith('.KQ') ? '₩' : '$'}{h.lossPrice}</span>}
                     {h.tradeReason && <div className="pf-journal-reason">이유: {h.tradeReason}</div>}
                     {h.memo && <div className="pf-journal-memo">📝 {h.memo}</div>}
                   </div>
@@ -1014,12 +1014,12 @@ function PortfolioPage({ userId }) {
                   />
                 </label>
                 <label className="pf-form-label pf-form-half">
-                  평균단가($) *
+                  평균단가({(formTicker.toUpperCase().endsWith('.KS') || formTicker.toUpperCase().endsWith('.KQ')) ? '₩' : '$'}) *
                   <input
                     className="pf-form-input"
                     type="number"
                     step="0.01"
-                    placeholder="150.00"
+                    placeholder={(formTicker.toUpperCase().endsWith('.KS') || formTicker.toUpperCase().endsWith('.KQ')) ? "예: 60000" : "150.00"}
                     value={formPrice}
                     onChange={e => setFormPrice(e.target.value)}
                   />
@@ -1041,11 +1041,11 @@ function PortfolioPage({ userId }) {
               </label>
               <div className="pf-form-row">
                 <label className="pf-form-label pf-form-half">
-                  목표가($)
+                  목표가({(formTicker.toUpperCase().endsWith('.KS') || formTicker.toUpperCase().endsWith('.KQ')) ? '₩' : '$'})
                   <input className="pf-form-input" type="number" placeholder="익절 타겟" value={formTargetPrice} onChange={e => setFormTargetPrice(e.target.value)} />
                 </label>
                 <label className="pf-form-label pf-form-half">
-                  손절가($)
+                  손절가({(formTicker.toUpperCase().endsWith('.KS') || formTicker.toUpperCase().endsWith('.KQ')) ? '₩' : '$'})
                   <input className="pf-form-input" type="number" placeholder="리스크 컷" value={formLossPrice} onChange={e => setFormLossPrice(e.target.value)} />
                 </label>
               </div>
