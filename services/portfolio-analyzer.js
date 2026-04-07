@@ -320,28 +320,60 @@ function analyzeHolding(stockData, holding) {
     // 상위 3개 이유 (부정적 → 긍정적 순)
     const reasons = allReasons.slice(0, 3);
 
-    // 전략 문구 선택
-    const templates = STRATEGY_TEMPLATES[badgeInfo.badge] || STRATEGY_TEMPLATES['보통'];
-    let strategy = templates[Math.floor(Math.random() * templates.length)];
+    // 동적 전략 문구 생성 엔진 (상태 배지 + 현재 수익률 결합)
+    function generateAdvancedStrategy(badge, pnlPct) {
+        if (pnlPct == null) {
+            // 평단가 정보가 없는 경우 기본값
+            if (badge === '상승 우세') return '추세가 강하게 유지되고 있습니다. 긍정적 관점을 유지하세요.';
+            if (badge === '보통') return '뚜렷한 방향성 없이 횡보 중입니다. 새로운 추세 확인 전까지 관망 우세를 권장합니다.';
+            if (badge === '주의') return '모멘텀 둔화가 포착되었습니다. 무리한 매입보다는 관망하며 지표 추이를 살피세요.';
+            if (badge === '경고') return '단기 하락 추세가 강합니다. 추가 매수보다는 리스크 관리를 우선하세요.';
+            if (badge === '리스크 높음') return '대부분의 지표가 심각한 약세를 지시합니다. 보수적 대응 기준을 철저히 지키세요.';
+            return '시장 방향성을 탐색하는 구간입니다.';
+        }
 
-    // 보유 손익 반영 기민한 문구 수정
+        // 1. 큰 수익 중 (20% 이상)
+        if (pnlPct >= 20) {
+            if (badge === '상승 우세' || badge === '보통') return '수익이 든든하게 받쳐주고 있습니다. 잔파도에 흔들리지 말고 수익 포지션을 길게 끌고 가는 것을 참고하세요.';
+            // 수익 중인데 상태 악화
+            return '단기 하락 추세가 뚜렷해 수익 보호가 중요합니다. 수익이 높은 상태이므로 일부 이익 실현(익절) 및 비중 조절 검토가 유리할 수 있습니다.';
+        }
+
+        // 2. 적당한 수익 (5% ~ 20%)
+        if (pnlPct >= 5 && pnlPct < 20) {
+            if (badge === '상승 우세') return '좋은 수익 흐름입니다. 눌림목 발생 시 분할 접근해 수익금을 극대화해볼 수 있습니다.';
+            if (badge === '보통') return '수익 전환 후 안정권입니다. 주요 지지선 이탈 여부만 살피며 홀딩하세요.';
+            return '상승 모멘텀이 꺾이고 있습니다. 그간의 수익이 모두 반납되기 전 이익을 확정 짓는 방어적 매도를 고려하세요.';
+        }
+
+        // 3. 큰 손실 중 (-15% 이하)
+        if (pnlPct <= -15) {
+            if (badge === '상승 우세' || badge === '보통') return '저점을 다지고 기술적 반등이 기대되는 위치입니다. 섣부른 물타기보다는 확실한 턴어라운드를 지켜보세요.';
+            // 손실 중인데 상태도 악화
+            return '하락 가속 및 기술적 약세가 뚜렷합니다. 손실이 눈덩이처럼 확대될 수 있으니 확실한 기술적 반등 시 비중 축소를 적극 검토하세요.';
+        }
+
+        // 4. 약손실 구간 (-15% ~ -3%)
+        if (pnlPct > -15 && pnlPct <= -3) {
+            if (badge === '상승 우세') return '기술적 바닥을 탈출하는 흐름입니다. 평단가를 낮출 분할 접근을 조심스레 고려해볼 만합니다.';
+            if (badge === '보통') return '방향성이 불분명한 애매한 구간입니다. 섣불리 움직이지 말고 추세 확인 후 대응하세요.';
+            return '손실 흐름이 지속되고 있습니다. 추가 하락에 대비하여 기계적인 지지선/손절선을 설정하고 비중을 조절하세요.';
+        }
+
+        // 5. 보합권 (-3% ~ +5%)
+        if (badge === '상승 우세') return '추세가 다시 살아나는 긍정적인 초기 구간입니다. 보유를 유지하며 상승을 지켜보세요.';
+        if (badge === '보통') return '뚜렷한 방향성이 나오지 않아 애매한 보합권입니다. 철저히 관망 우세를 권장합니다.';
+        return '하방 압력이 거세지고 있습니다. 방향성이 부정적이므로 비중을 축소하거나 현금 확보를 하는 것이 안전할 수 있습니다.';
+    }
+
     let profitNote = '';
     const currentPrice = safeNum(stockData.price?.current);
-    if (currentPrice != null && holding.avgPrice > 0) {
-        const pnlPct = ((currentPrice / holding.avgPrice) - 1) * 100;
-        
-        if (pnlPct > 20 && (badgeInfo.badge === '주의' || badgeInfo.badge === '경고' || badgeInfo.badge === '리스크 높음')) {
-            // 큰 수익 중인데 상태가 악화되는 경우
-            strategy = '단기 하락 추세가 뚜렷해 수익 보호를 위한 일부 익절/비중 축소 검토가 필요합니다.';
-            profitNote = '';
-            reasons.unshift('비중 과다 및 추세 약화');
-        } else {
-            if (pnlPct > 30 && badgeInfo.badge !== '경고' && badgeInfo.badge !== '리스크 높음') {
-                profitNote = ' (수익률이 높아 수익 실현 전략도 고려 가능)';
-            } else if (pnlPct < -15 && (badgeInfo.badge === '경고' || badgeInfo.badge === '리스크 높음')) {
-                profitNote = ' (손실 확대 방지를 위한 보수적 대응 권장)';
-            }
-        }
+    const pnlPct = (currentPrice != null && holding.avgPrice > 0) ? ((currentPrice / holding.avgPrice) - 1) * 100 : null;
+    let strategy = generateAdvancedStrategy(badgeInfo.badge, pnlPct);
+
+    // 고점 징후 팩터 강제 주입
+    if (pnlPct >= 20 && (badgeInfo.badge === '주의' || badgeInfo.badge === '경고' || badgeInfo.badge === '리스크 높음')) {
+        reasons.unshift('고수익권 추세 약화');
     }
 
     return {
