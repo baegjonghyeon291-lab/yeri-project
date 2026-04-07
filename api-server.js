@@ -185,6 +185,19 @@ app.post('/api/chat', async (req, res) => {
             return res.json({ messages });
         }
 
+        // ★★ 포트폴리오 기능 프리라우팅 (우선순위 강제) ★★
+        const PORTFOLIO_KEYWORDS = ['포트폴리오', '내 자산', '보유종목', '보유 종목', '내 종목', '내자산', '브리핑'];
+        const isPortfolioKeyword = PORTFOLIO_KEYWORDS.some(k => text.includes(k));
+        
+        if (intent.type === 'portfolio' || isPortfolioKeyword) {
+            console.log(`[API /chat] ▶ Portfolio intent 매칭 (fallback 금지) → 포트폴리오 탭 안내 반환`);
+            
+            const reply = `📊 **포트폴리오 전용 대시보드 연동 완료**\n\n현재 포트폴리오의 실시간 7팩터 상태 및 리밸런싱 제안, 종목별 배지 정보는 전용 페이지에서 확인하실 수 있습니다.\n화면 우측 상단의 **[포트폴리오 분석]** 탭을 통해 즉각적인 일일 브리핑과 전체 투자 종합 진단을 확인해 보세요.`;
+            
+            messages.push({ type: 'text', content: reply });
+            return res.json({ messages });
+        }
+
         // ★★ 개념/용어 질문 프리라우팅 ★★
         // [지표명] + [뭐야/뜻/무엇/의미] 패턴 → concept_answer 직행
         const METRIC_KEYWORDS = ['PER', 'PBR', 'EPS', 'ROE', 'ROA', 'RSI', 'MACD', 'FCF', 'BPS', 'PEG',
