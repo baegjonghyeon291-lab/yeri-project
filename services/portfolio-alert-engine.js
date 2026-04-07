@@ -83,6 +83,20 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
             }
         }
 
+        // 4-5. 총 평가금액 목표 도달 (Total Value Above)
+        const totalValueAbove = safeNum(alerts.totalValueAbove);
+        const currentTotalValue = currentPrice * holding.quantity;
+        if (totalValueAbove != null && currentTotalValue >= totalValueAbove) {
+            if (canFireAlert(userId, ticker, 'totalValueAbove', 24)) {
+                addNotification(userId, {
+                    type: 'TOTAL_VALUE',
+                    message: `💰 달성! ${ticker} 보유 종목의 총 평가금액이 목표치인 $${totalValueAbove.toLocaleString()}을 돌파했습니다! (현재 $${currentTotalValue.toLocaleString(undefined, {maximumFractionDigits:2})})`,
+                    ticker: ticker
+                });
+                recordAlertFired(userId, ticker, 'totalValueAbove');
+            }
+        }
+
         // 5. 비중 초과 알림 (Max Weight)
         const maxWeight = safeNum(alerts.maxWeight);
         if (maxWeight != null && weightPct != null && weightPct >= maxWeight) {

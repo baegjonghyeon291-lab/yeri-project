@@ -2,22 +2,25 @@ const axios = require('axios');
 
 async function run() {
     try {
-        const userId = 'webapp'; // Assuming 'webapp' is the user ID if not specified
+        const userId = 'webapp'; // Assuming 'webapp'
 
-        console.log("1. Adding IREN with takeProfitPct=1% to trigger alert...");
+        console.log("1. Adding IREN with totalValueAbove=3000 to trigger alert...");
         await axios.post(`http://localhost:3001/api/portfolio/${userId}/add`, {
             ticker: "IREN",
             name: "IREN",
-            quantity: 100,
-            avgPrice: 8, // Assuming 8, current price is around 35 so it's a huge profit.
+            quantity: 100, // 100 shares
+            avgPrice: 8,   // average price 8
             alerts: {
                 enabled: true,
-                takeProfitPct: 1, // 1% profit target, which will definitely trigger since 8 -> 35 is >300%
+                takeProfitPct: null,
                 priceAbove: null,
                 priceBelow: null,
                 stopLossPct: null,
                 maxWeight: null,
-                badgeChange: true
+                totalValueAbove: 3000, // Current price is 35, so 35 * 100 = 3500, which is > 3000. It will definitely trigger!
+                badgeChange: false,
+                predictEnabled: true,
+                predictBreakout: true
             }
         });
 

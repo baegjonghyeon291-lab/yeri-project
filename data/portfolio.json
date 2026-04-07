@@ -10,7 +10,7 @@
       {
         "ticker": "IREN",
         "name": "IREN",
-        "quantity": 200,
+        "quantity": 300,
         "avgPrice": 8,
         "buyDate": null,
         "memo": null,
@@ -20,12 +20,15 @@
         "viewTerm": "단기",
         "alerts": {
           "enabled": true,
-          "takeProfitPct": 1,
+          "takeProfitPct": null,
           "priceAbove": null,
           "priceBelow": null,
           "stopLossPct": null,
           "maxWeight": null,
-          "badgeChange": true
+          "totalValueAbove": 3000,
+          "badgeChange": false,
+          "predictEnabled": true,
+          "predictBreakout": true
         },
         "addedAt": "2026-04-07T05:04:42.161Z"
       }
