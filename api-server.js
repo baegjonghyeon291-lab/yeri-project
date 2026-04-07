@@ -1378,7 +1378,7 @@ app.get('/api/suggest', async (req, res) => {
 
         // 로컬 사전에서 HIGH 매칭이면 즉시 반환 (빠른 응답)
         if (localResult.tier === 'HIGH' && localResult.candidates.length > 0) {
-            const enriched = await enrichCandidatesWithPrice(localResult.candidates.slice(0, 3));
+            const enriched = await enrichCandidatesWithPrice(localResult.candidates.slice(0, 20));
             return res.json({ ok: true, ...localResult, candidates: enriched });
         }
 
@@ -1403,7 +1403,7 @@ app.get('/api/suggest', async (req, res) => {
         const merged = mergeSuggestResults(localResult, apiCandidates);
 
         // 4단계: 상위 후보에 currentPrice 보강
-        merged.candidates = await enrichCandidatesWithPrice(merged.candidates.slice(0, 5));
+        merged.candidates = await enrichCandidatesWithPrice(merged.candidates.slice(0, 20));
 
         res.json({ ok: true, ...merged });
     } catch (e) {
