@@ -67,7 +67,7 @@ const { generateRecommendations } = require('./services/recommendation-engine');
 const sessions = require('./services/session');
 const watchlistStore = require('./services/watchlist-store');
 const portfolioStore = require('./services/portfolio-store');
-const { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing } = require('./services/portfolio-analyzer');
+const { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing, generateTodayActions } = require('./services/portfolio-analyzer');
 const userSettings = require('./services/user-settings');
 const { scanWatchlist, invalidateCache } = require('./services/alert-engine');
 
@@ -845,6 +845,7 @@ async function buildPortfolioSnapshot(userId) {
     const healthScore = calculateHealthScore(enriched, allocations, portfolioStatus);
     const rebalancing = calculateRebalancing(allocations, healthScore, portfolioStatus);
     const dailyBriefing = buildDailyBriefing(portfolioStatus, healthScore, enriched);
+    const todayActions = generateTodayActions(enriched, healthScore, portfolioStatus);
 
     return {
         holdings: enriched,
@@ -855,7 +856,7 @@ async function buildPortfolioSnapshot(userId) {
             totalProfitLoss: Math.round(totalPL * 100) / 100,
             totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
         },
-        portfolioStatus, allocations, healthScore, rebalancing, dailyBriefing
+        portfolioStatus, allocations, healthScore, rebalancing, dailyBriefing, todayActions
     };
 }
 
@@ -1107,6 +1108,36 @@ app.get('/api/market', async (req, res) => {
         res.json({ report });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// ── 대시보드 위젯 API (홈 화면) ────────────────────────────────────
+app.get('/api/dashboard/:userId', async (req, res) => {
+    try {
+        const [marketData, snap] = await Promise.all([
+            fetchMarketData().catch(() => null),
+            buildPortfolioSnapshot(req.params.userId).catch(() => null)
+        ]);
+
+        let marketStatus = '보통 (중립)';
+        if (marketData && marketData.market_sentiment && marketData.market_sentiment.fear_greed_index != null) {
+            const fg = marketData.market_sentiment.fear_greed_index.value;
+            if (fg > 65) marketStatus = '강세 (탐욕)';
+            else if (fg < 35) marketStatus = '약세 (공포)';
+        }
+
+        res.json({
+            ok: true,
+            market: { status: marketStatus },
+            portfolio: snap ? {
+                healthLabel: snap.healthScore.label,
+                riskTop: (snap.portfolioStatus.riskTop3 || []).map(r => r.ticker).join(', '),
+                strongTop: (snap.portfolioStatus.strongTop3 || []).map(s => s.ticker).join(', ')
+            } : null,
+            todayAction: snap && snap.todayActions && snap.todayActions.length > 0 ? snap.todayActions[0] : null
+        });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
     }
 });
 

@@ -217,6 +217,32 @@ function scoreReliability(data) {
 }
 
 // ══════════════════════════════════════════════════════════
+// 동적 가격 구간 계산 (익절/손절/관망)
+// ══════════════════════════════════════════════════════════
+function calculatePriceZones(data) {
+    if (!data.price || data.price.current == null) return null;
+    const price = data.price.current;
+    
+    const ema20 = data.technical?.ema20;
+    const ema50 = data.technical?.ema50;
+    const high52 = data.fundamentals?.['52WeekHigh'];
+    
+    let tp1 = Number((price * 1.10).toFixed(2)); // 단기 10%
+    let tp2 = high52 ? Math.max(high52, price * 1.20) : Number((price * 1.20).toFixed(2)); // 52주 고점 혹은 20%
+    
+    // 손절은 EMA50 또는 -8% 기준
+    let sl = ema50 ? Number((Math.min(ema50, price * 0.92)).toFixed(2)) : Number((price * 0.92).toFixed(2));
+    
+    // 이탈 경계는 EMA20 이탈 시
+    let trendBreak = ema20 ? Number((ema20 * 0.98).toFixed(2)) : Number((price * 0.95).toFixed(2));
+    
+    let observeMin = Number((price * 0.97).toFixed(2));
+    let observeMax = Number((price * 1.03).toFixed(2));
+
+    return { tp1, tp2, sl, observeMin, observeMax, trendBreak };
+}
+
+// ══════════════════════════════════════════════════════════
 // 종합 분석: 7팩터 → 상태 배지 → 전략 문구 → 이유
 // ══════════════════════════════════════════════════════════
 
@@ -384,6 +410,7 @@ function analyzeHolding(stockData, holding) {
         action: badgeInfo.action,
         strategy: strategy + profitNote,
         reasons,
+        priceZones: calculatePriceZones(stockData)
     };
 }
 
@@ -542,4 +569,59 @@ function buildDailyBriefing(summary, health, holdings) {
     };
 }
 
-module.exports = { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing };
+/** 오늘의 액션 생성 (홈 대시보드 및 브리핑용) */
+function generateTodayActions(holdingsWithStatus, health, summary) {
+    const actions = [];
+    const pushAction = (ticker, action, reason, priority) => {
+        if (!actions.find(a => a.ticker === ticker) && actions.length < 5) {
+            actions.push({ ticker, action, reason, priority });
+        }
+    };
+
+    // 1. 비중 과다 + 추세 악화
+    holdingsWithStatus.forEach(h => {
+        const weight = h.currentValue ? (h.currentValue / holdingsWithStatus.reduce((s, x) => s + (x.currentValue || 0), 0)) * 100 : 0;
+        if (weight >= 30 && (h.status?.badge === '경고' || h.status?.badge === '리스크 높음')) {
+            pushAction(h.ticker, '비중 즉각 축소', `너무 높은 비중(${weight.toFixed(1)}%)에 하락 추세가 심화 중입니다. 신속한 리스크 관리가 필요합니다.`, 'HIGH');
+        }
+    });
+
+    // 2. 위험 상태 종목
+    summary.riskTop3.forEach(r => {
+        pushAction(r.ticker, '손절/비중 축소 검토', `${r.ticker}의 상태가지표 악화 중입니다. (${r.reason})`, 'HIGH');
+    });
+
+    // 3. 고수익권 + 꺾임 (익절)
+    holdingsWithStatus.forEach(h => {
+        if (h.profitLossPct >= 20 && (h.status?.badge === '주의' || h.status?.badge === '경고')) {
+            pushAction(h.ticker, '수익 실현', `높은 수익 구간이나 추세가 약화 중이므로 익절을 통한 수익 확정을 추천합니다.`, 'MEDIUM');
+        }
+    });
+
+    // 4. 그냥 비중이 과도한 경우
+    holdingsWithStatus.forEach(h => {
+        const weight = h.currentValue ? (h.currentValue / holdingsWithStatus.reduce((s, x) => s + (x.currentValue || 0), 0)) * 100 : 0;
+        if (weight >= 35) {
+            pushAction(h.ticker, '비중 조절 (리밸런싱)', `포트폴리오 비중(${weight.toFixed(1)}%) 쏠림이 큽니다. 종목 분산을 고려하세요.`, 'MEDIUM');
+        }
+    });
+
+    // 5. 매우 강한 종목 (불타기)
+    summary.strongTop3.forEach(s => {
+        pushAction(s.ticker, '추가 매수 관심', `상승 모멘텀이 매우 강력합니다. 적절한 눌림목에서 분할 매수해 볼 만합니다.`, 'LOW');
+    });
+
+    if (actions.length === 0) {
+        actions.push({
+            ticker: 'PORTFOLIO',
+            action: '관망 / 현재 유지',
+            reason: `전반적인 밸런스가 양호합니다. 급하게 움직이기보단 현재 흐름을 지켜보세요.`,
+            priority: 'LOW'
+        });
+    }
+
+    return actions;
+}
+
+module.exports = { analyzeHolding, buildPortfolioSummary, analyzeAllocation, calculateHealthScore, calculateRebalancing, buildDailyBriefing, calculatePriceZones, generateTodayActions };
+

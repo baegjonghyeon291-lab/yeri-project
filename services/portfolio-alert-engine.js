@@ -123,6 +123,100 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
                 }
             }
         }
+
+        // ═══════════════════════════════════════════════════════
+        // 예측/사전 경고 알림 (도달 전 조기 감지)
+        // ═══════════════════════════════════════════════════════
+        if (!alerts.predictEnabled) return;
+
+        const overall = safeNum(holding.status?.overall);
+        const scores = holding.status?.scores || {};
+        const trendScore = safeNum(scores.trend);
+        const momentumScore = safeNum(scores.momentum);
+        const changePctVal = safeNum(holding.changePct);
+
+        // 7. 목표가 돌파 가능성 감지 (Breakout Proximity)
+        //    priceAbove가 설정되어 있고, 현재가가 목표가의 90~99% 도달 + 상승 추세일 때
+        if (alerts.predictBreakout && priceAbove != null && currentPrice < priceAbove) {
+            const ratio = currentPrice / priceAbove;
+            if (ratio >= 0.90 && (changePctVal == null || changePctVal >= 0)) {
+                if (canFireAlert(userId, ticker, 'predict_breakout', 12)) {
+                    const pct = ((1 - ratio) * 100).toFixed(1);
+                    addNotification(userId, {
+                        type: 'PREDICT_BREAKOUT',
+                        message: `🔮📈 ${ticker} 목표 돌파 가능성! 현재가($${currentPrice.toFixed(2)})가 설정 목표($${priceAbove})까지 ${pct}% 남았습니다. 상승 추세가 유지되고 있어요!`,
+                        ticker: ticker
+                    });
+                    recordAlertFired(userId, ticker, 'predict_breakout');
+                }
+            }
+        }
+
+        // 8. 상승 모멘텀 강화 감지 (Momentum Surge)
+        //    종합점수 ≥ 70 + 추세 or 모멘텀 점수 ≥ 65
+        if (alerts.predictMomentumUp && overall != null && overall >= 70) {
+            const hasMomentum = (trendScore != null && trendScore >= 65) || (momentumScore != null && momentumScore >= 65);
+            if (hasMomentum) {
+                if (canFireAlert(userId, ticker, 'predict_momentum_up', 12)) {
+                    addNotification(userId, {
+                        type: 'PREDICT_MOMENTUM_UP',
+                        message: `🔮🚀 ${ticker} 상승 모멘텀 강화! 종합점수 ${overall}점, 추세/모멘텀이 강세 구간에 진입했어요. 추가 매수 타이밍일 수 있어요!`,
+                        ticker: ticker
+                    });
+                    recordAlertFired(userId, ticker, 'predict_momentum_up');
+                }
+            }
+        }
+
+        // 9. 하락 위험 확대 감지 (Dump Risk)
+        //    종합점수 ≤ 35 + 당일 3% 이상 하락 추세
+        if (alerts.predictDump) {
+            const isDumping = (overall != null && overall <= 35) || (changePctVal != null && changePctVal <= -3);
+            if (isDumping) {
+                if (canFireAlert(userId, ticker, 'predict_dump', 12)) {
+                    const reason = [];
+                    if (overall != null && overall <= 35) reason.push(`종합점수 ${overall}점`);
+                    if (changePctVal != null && changePctVal <= -3) reason.push(`당일 ${changePctVal.toFixed(2)}% 하락`);
+                    addNotification(userId, {
+                        type: 'PREDICT_DUMP',
+                        message: `🔮📉 ${ticker} 하락 위험 확대! ${reason.join(', ')}. 손절 기준이나 포지션 축소를 검토해 보세요.`,
+                        ticker: ticker
+                    });
+                    recordAlertFired(userId, ticker, 'predict_dump');
+                }
+            }
+        }
+
+        // 10. 경고 단계 진입 직전 감지 (Badge Downgrade Risk)
+        //     종합점수 40~49 (보통→주의 or 주의→경고 경계)
+        if (alerts.predictBadgeDown && overall != null) {
+            if (overall >= 40 && overall <= 49 && badge !== '경고' && badge !== '리스크 높음') {
+                if (canFireAlert(userId, ticker, 'predict_badge_down', 12)) {
+                    addNotification(userId, {
+                        type: 'PREDICT_BADGE_DOWN',
+                        message: `🔮⚠️ ${ticker} 경고 단계 진입 직전! 종합점수 ${overall}점으로 하락 경계구간에 있습니다. 상태 변화를 주의 깊게 지켜보세요.`,
+                        ticker: ticker
+                    });
+                    recordAlertFired(userId, ticker, 'predict_badge_down');
+                }
+            }
+        }
+
+        // 11. 비중 위험 확대 감지 (Weight Risk Approaching)
+        //     maxWeight가 설정되어 있고, 현재비중이 maxWeight의 85~99% 도달
+        if (alerts.predictWeightRisk && maxWeight != null && weightPct != null && weightPct < maxWeight) {
+            const weightRatio = weightPct / maxWeight;
+            if (weightRatio >= 0.85) {
+                if (canFireAlert(userId, ticker, 'predict_weight_risk', 12)) {
+                    addNotification(userId, {
+                        type: 'PREDICT_WEIGHT_RISK',
+                        message: `🔮⚖️ ${ticker} 비중 위험 확대 중! 현재 비중(${weightPct.toFixed(1)}%)이 설정 한도(${maxWeight}%)에 근접하고 있어요. 리밸런싱을 검토해 보세요.`,
+                        ticker: ticker
+                    });
+                    recordAlertFired(userId, ticker, 'predict_weight_risk');
+                }
+            }
+        }
     });
 }
 

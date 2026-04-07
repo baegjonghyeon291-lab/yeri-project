@@ -1,6 +1,30 @@
 {
   "webapp": [
     {
+      "id": "1775539455520ibxr",
+      "type": "STATUS_WARNING",
+      "message": "🚨 IREN의 상태 배지가 [경고](으)로 악화되었습니다. 예리의 대응 전략을 확인해 보세요!",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-07T05:24:15.520Z"
+    },
+    {
+      "id": "1775539455519hh78",
+      "type": "WEIGHT_WARNING",
+      "message": "⚠️ IREN 비중이 설정한 한도(30%)를 초과했습니다. 포트폴리오 리스크 관리가 필요할 수 있습니다. (현재 비중: 100.0%)",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-07T05:24:15.519Z"
+    },
+    {
+      "id": "1775539455517piwr",
+      "type": "PRICE_ABOVE",
+      "message": "📈 IREN 현재가가 설정한 돌파 가격($15)을 돌파했습니다! (현재 $35.13)",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-07T05:24:15.517Z"
+    },
+    {
       "id": "17755386094347w8v",
       "type": "TOTAL_VALUE",
       "message": "💰 달성! IREN 보유 종목의 총 평가금액이 목표치인 $3,000을 돌파했습니다! (현재 $10,539)",
@@ -15,6 +39,32 @@
       "ticker": "IREN",
       "isRead": false,
       "createdAt": "2026-04-07T05:05:27.203Z"
+    }
+  ],
+  "test-predict": [
+    {
+      "id": "1775540321355t372",
+      "type": "PREDICT_WEIGHT_RISK",
+      "message": "🔮⚖️ IREN 비중 위험 확대 중! 현재 비중(100.0%)이 설정 한도(115%)에 근접하고 있어요. 리밸런싱을 검토해 보세요.",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-07T05:38:41.355Z"
+    },
+    {
+      "id": "1775540321354c54v",
+      "type": "PREDICT_BREAKOUT",
+      "message": "🔮📈 IREN 목표 돌파 가능성! 현재가($35.13)가 설정 목표($38)까지 7.6% 남았습니다. 상승 추세가 유지되고 있어요!",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-07T05:38:41.354Z"
+    },
+    {
+      "id": "1775540321351q5q6",
+      "type": "STATUS_WARNING",
+      "message": "🚨 IREN의 상태 배지가 [경고](으)로 악화되었습니다. 예리의 대응 전략을 확인해 보세요!",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-07T05:38:41.352Z"
     }
   ]
 }

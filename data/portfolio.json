@@ -9,8 +9,8 @@
     "holdings": [
       {
         "ticker": "IREN",
-        "name": "IREN",
-        "quantity": 300,
+        "name": "Iris Energy",
+        "quantity": 100,
         "avgPrice": 8,
         "buyDate": null,
         "memo": null,
@@ -20,18 +20,25 @@
         "viewTerm": "단기",
         "alerts": {
           "enabled": true,
-          "takeProfitPct": null,
-          "priceAbove": null,
-          "priceBelow": null,
-          "stopLossPct": null,
-          "maxWeight": null,
+          "takeProfitPct": 20,
+          "priceAbove": 15,
+          "priceBelow": 5,
+          "stopLossPct": -10,
+          "maxWeight": 30,
           "totalValueAbove": 3000,
-          "badgeChange": false,
+          "badgeChange": true,
           "predictEnabled": true,
-          "predictBreakout": true
+          "predictBreakout": true,
+          "predictMomentumUp": true,
+          "predictDump": true,
+          "predictBadgeDown": true,
+          "predictWeightRisk": true
         },
-        "addedAt": "2026-04-07T05:04:42.161Z"
+        "addedAt": "2026-04-07T05:37:44.302Z"
       }
     ]
+  },
+  "test-predict": {
+    "holdings": []
   }
 }
