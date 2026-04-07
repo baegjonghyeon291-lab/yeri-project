@@ -85,6 +85,13 @@ app.get('/api/debug/logs', (req, res) => {
     res.send(logBuffer.join('\n'));
 });
 
+app.use((req, res, next) => {
+    if (!req.path.startsWith('/assets') && !req.path.includes('/api/debug/logs')) {
+        logDebug(`[GLOBAL] ${req.method} ${req.path}`);
+    }
+    next();
+});
+
 // ── 정적 파일 서빙 (웹앱 프론트엔드) ──────────────────────────────
 const webappDist = path.join(__dirname, 'yeri-webapp', 'dist');
 
