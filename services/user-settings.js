@@ -16,6 +16,7 @@ const DEFAULTS = {
     alertEnabled:    true,
     timezone:        'Asia/Seoul',
     onboardingDone:  false,
+    mode:            'advanced', // 'beginner' | 'advanced'
 };
 
 function load() {

@@ -831,6 +831,11 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
             industry: stockData?.fundamentals?.industry || 'Unknown',
             mktCap: stockData?.fundamentals?.mktCap || null,
             beta: stockData?.fundamentals?.beta || null,
+            dividend: {
+                yield: stockData?.fundamentals?.dividendYield || null,
+                rate: stockData?.fundamentals?.dividendRate || null,
+                exDate: stockData?.fundamentals?.exDividendDate || null
+            }
         });
         await new Promise(r => setTimeout(r, 200));
     }
@@ -838,6 +843,7 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
     const totalInvested = enriched.reduce((s, h) => s + h.investedAmount, 0);
     const totalValue = enriched.reduce((s, h) => s + (h.currentValue || h.investedAmount), 0);
     const totalPL = totalValue - totalInvested;
+    const totalAnnualDividend = enriched.reduce((s, h) => s + ((h.quantity * (h.dividend?.rate || 0)) || 0), 0);
 
     enriched.forEach(h => {
         h.weight = totalValue > 0 && h.currentValue != null
@@ -861,6 +867,8 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
             totalValue: Math.round(totalValue * 100) / 100,
             totalProfitLoss: Math.round(totalPL * 100) / 100,
             totalProfitLossPct: totalInvested > 0 ? Math.round((totalPL / totalInvested) * 10000) / 100 : 0,
+            totalAnnualDividend: Math.round(totalAnnualDividend * 100) / 100,
+            dividendYieldPct: totalInvested > 0 ? Math.round((totalAnnualDividend / totalInvested) * 10000) / 100 : 0
         },
         portfolioStatus, allocations, diversification, healthScore, rebalancing, dailyBriefing, todayActions
     };
@@ -870,13 +878,15 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
 app.get('/api/portfolio/:userId', async (req, res) => {
     logDebug(`[API /portfolio/GET] 포트폴리오 조회 - req.params.userId: [${req.params.userId}]`);
     try {
+        const settings = userSettings.get(req.params.userId);
         const snap = await buildPortfolioSnapshot(req.params.userId);
         if (!snap) {
             return res.json({
                 holdings: [],
                 summary: { holdingCount: 0, totalInvested: 0, totalValue: 0, totalProfitLoss: 0, totalProfitLossPct: 0 },
                 portfolioStatus: { bullishCount: 0, normalCount: 0, cautionCount: 0, warningCount: 0, riskTop3: [], strongTop3: [], needCheckTop3: [] },
-                message: '보유종목이 없습니다. 종목을 추가해주세요.'
+                message: '보유종목이 없습니다. 종목을 추가해주세요.',
+                userMode: settings.mode || 'advanced'
             });
         }
         
@@ -891,6 +901,7 @@ app.get('/api/portfolio/:userId', async (req, res) => {
             healthScore: snap.healthScore.score
         });
 
+        snap.userMode = settings.mode || 'advanced';
         res.json(snap);
     } catch (err) {
         console.error('[Portfolio GET]', err.message);

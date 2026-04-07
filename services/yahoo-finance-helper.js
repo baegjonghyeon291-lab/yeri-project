@@ -208,6 +208,7 @@ async function getYahooFundamentals(ticker) {
                     'financialData',
                     'incomeStatementHistory',
                     'calendarEvents',
+                    'summaryDetail',
                 ]
             }, { validateResult: false }),
         ]);
@@ -217,6 +218,7 @@ async function getYahooFundamentals(ticker) {
         const ks = s?.defaultKeyStatistics;
         const fd = s?.financialData;
         const sp = s?.summaryProfile;
+        const sd = s?.summaryDetail;
 
         // 손익계산서 (연간 최신 2기 비교)
         const inc0 = s?.incomeStatementHistory?.incomeStatementHistory?.[0];
@@ -246,6 +248,15 @@ async function getYahooFundamentals(ticker) {
                     : null)
             : null;
 
+        const exDateRaw = s?.calendarEvents?.exDividendDate ?? sd?.exDividendDate;
+        const exDividendDate = exDateRaw
+            ? (exDateRaw instanceof Date 
+                ? exDateRaw.toISOString().slice(0, 10) 
+                : typeof exDateRaw === 'number'
+                    ? new Date(exDateRaw * 1000).toISOString().slice(0, 10)
+                    : null)
+            : null;
+
         if (!q && !s) return null;
 
         return {
@@ -269,6 +280,9 @@ async function getYahooFundamentals(ticker) {
             operatingIncome:  opIncome,
             freeCashFlow,
             nextEarningsDate,
+            dividendYield:    sd?.dividendYield ?? null,
+            dividendRate:     sd?.dividendRate ?? null,
+            exDividendDate,
             source:           'Yahoo',
         };
     } catch (e) {
