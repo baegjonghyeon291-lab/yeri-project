@@ -221,33 +221,34 @@ function scoreReliability(data) {
 // ══════════════════════════════════════════════════════════
 
 const BADGE_MAP = [
-    { min: 70, badge: '상승우세', emoji: '📈', action: '추가매수 참고' },
-    { min: 50, badge: '보통',     emoji: '➡️', action: '보유' },
-    { min: 30, badge: '주의',     emoji: '⚠️', action: '관망' },
-    { min: 0,  badge: '경고',     emoji: '🚨', action: '비중축소 검토' },
+    { min: 75, badge: '상승 우세', emoji: '📈', action: '추가매수 참고' },
+    { min: 55, badge: '보통',     emoji: '➡️', action: '보유' },
+    { min: 40, badge: '주의',     emoji: '⚠️', action: '관망' },
+    { min: 25, badge: '경고',     emoji: '🚨', action: '비중축소 검토' },
+    { min: -100, badge: '리스크 높음', emoji: '💀', action: '즉각 점검' },
 ];
 
 const STRATEGY_TEMPLATES = {
-    '상승우세': [
-        '추세가 유지되고 있어 조정 시 분할 추가매수 검토가 가능합니다.',
-        '실적/뉴스/기술 흐름이 양호해 보유 유지 또는 추가 접근을 고려할 수 있습니다.',
-        '현재 데이터 기준 상승 우세 흐름이라 눌림목 구간에서 추가매수 참고가 가능합니다.',
+    '상승 우세': [
+        '추세가 강하게 유지되고 있어 눌림목에서 분할 추가매수를 검토해볼 만합니다.',
+        '실적/수급/기술적 흐름이 모두 양호합니다. 긍정적 관점을 유지하세요.',
     ],
     '보통': [
-        '뚜렷한 방향성 없이 횡보 중이므로 추가 신호 확인 후 대응이 권장됩니다.',
-        '추세는 유지되지만 추가매수는 눌림목 확인 후 접근이 바람직합니다.',
-        '현재 중립 구간이므로 보유 유지하며 추세 변화를 지켜보는 것이 좋겠습니다.',
+        '뚜렷한 방향성 없이 횡보 중입니다. 무리한 매수보다는 관망이 유리합니다.',
+        '중립 구간에 머물러 있습니다. 주요 지지/저항선 돌파 여부를 지켜보세요.',
     ],
     '주의': [
-        '단기 모멘텀이 약화되고 있어 추가매수보다 관망이 유리할 수 있습니다.',
-        '일부 지표에서 약세 신호가 포착되어 비중 점검이 필요해 보입니다.',
-        '현재 데이터 기준 하락 가능성이 높아 보여 관망 또는 일부 정리가 유리할 수 있습니다.',
+        '단기 모멘텀이 꺾이면서 약세 신호가 포착되었습니다. 비중 확대는 피하세요.',
+        '변동성이 커지며 추세가 둔화되고 있습니다. 보수적 접근이 필요합니다.',
     ],
     '경고': [
-        '단기 하락 추세가 이어지고 있어 비중 축소 또는 매도 검토가 필요합니다.',
-        'EMA 하회와 약한 모멘텀, 부정적 흐름으로 하락 리스크가 커 보입니다.',
-        '복수 지표에서 약세 신호가 감지되어 즉시 포트폴리오 점검을 권장합니다.',
+        '단기 하락 추세가 뚜렷합니다. 손실이 커지기 전에 비중 축소를 검토하세요.',
+        '주요 지표들이 부정적입니다. 추가매수보다 리스크 관리를 우선하세요.',
     ],
+    '리스크 높음': [
+        '하락 가속화 구간입니다. 기술적 반등 시 매도하거나 즉각적인 포트폴리오 점검이 필수적입니다.',
+        '대부분의 지표가 심각한 약세를 가리킵니다. 손절매 라인을 철저히 지키세요.',
+    ]
 };
 
 /**
@@ -285,10 +286,22 @@ function analyzeHolding(stockData, holding) {
             totalWeight += weight;
         }
     }
-    const overall = totalWeight > 0 ? Math.round(totalScore / totalWeight) : null;
+    let overall = totalWeight > 0 ? Math.round(totalScore / totalWeight) : null;
+
+    // [손익 기반 페널티] 보유 종목이 크게 물려있다면 펀더멘탈/기수가 좋아도 고위험/주의로 강등
+    const currentPriceForPenalty = safeNum(stockData.price?.current);
+    if (overall != null && currentPriceForPenalty != null && holding.avgPrice > 0) {
+        const pnlPct = ((currentPriceForPenalty / holding.avgPrice) - 1) * 100;
+        if (pnlPct <= -30) {
+            overall -= 30; // -30% 이상 손실이면 매우 강한 페널티
+        } else if (pnlPct <= -15) {
+            overall -= 15;
+        }
+        if (overall < 0) overall = 0;
+    }
 
     // 상태 배지
-    let badgeInfo = BADGE_MAP[BADGE_MAP.length - 1]; // default: 경고
+    let badgeInfo = BADGE_MAP[BADGE_MAP.length - 1]; // default: 리스크 높음
     if (overall != null) {
         for (const b of BADGE_MAP) {
             if (overall >= b.min) { badgeInfo = b; break; }
@@ -443,17 +456,22 @@ function calculateHealthScore(holdingsWithStatus, allocations, summary) {
 function calculateRebalancing(allocations, health, summary) {
     const suggestions = [];
     if (allocations?.overConcentrated?.length > 0) {
-        const t = allocations.overConcentrated.map(a => `${a.ticker}(${a.weight.toFixed(1)}%)`).join(', ');
-        suggestions.push(`${t} 비중이 30%를 초과하여 과집중 리스크가 있습니다. 일부 축소를 검토할 수 있습니다.`);
+        const t = allocations.overConcentrated.map(a => a.ticker).join(', ');
+        suggestions.push(`🔴 [리스크 관리] ${t}의 비중이 30%를 초과해 특정 종목 하락 시 전체 타격이 큽니다. 일부 익절/손절을 통한 비중 축소를 검토하세요.`);
     }
-    if (health.score < 50) {
-        suggestions.push('전체적인 포트폴리오 건강도가 낮습니다. 현금 비중 확대나 방어주 편입을 고려해 보세요.');
+    if (summary.warningCount >= 1 || summary.riskTop3?.length > 0) {
+        const t = summary.riskTop3?.map(r=>r.ticker).join(', ') || '보유하신 위험 종목';
+        suggestions.push(`🔴 [비중 축소] ${t} 등은 단기 하락 추세나 펀더멘탈 악화가 우려되므로 추가 매수보다 비중을 줄여 리스크를 낮추세요.`);
     }
-    if (summary.warningCount >= 2) {
-        suggestions.push('경고 배지를 받은 종목이 2개 이상입니다. 해당 종목들의 리스크 점검이 시급합니다.');
+    if (summary.strongTop3?.length > 0) {
+        const t = summary.strongTop3?.map(s=>s.ticker).join(', ');
+        suggestions.push(`🟢 [추가 매수] ${t} 등 상승 우세 종목은 현재 모멘텀과 실적 지표가 양호하므로 눌림목 발생 시 비중을 늘려보는 것을 참고하세요.`);
+    }
+    if (health.score < 50 && summary.strongTop3?.length === 0) {
+        suggestions.push(`⚠️ [관망 유지] 포트폴리오 전반의 모멘텀이 약합니다. 확실한 반등 신호가 나오기 전까지는 신규 매수를 자제하고 현금을 확보하세요.`);
     }
     if (suggestions.length === 0) {
-        suggestions.push('전반적인 비중과 리스크가 잘 관리되고 있습니다. 현행 유지를 기본으로 시장 변동에 대응하세요.');
+        suggestions.push(`✅ [현행 유지] 펀더멘탈과 수익 상태가 양호합니다. 현재의 비중을 유지하며 시장 흐름에 편승하세요.`);
     }
     return suggestions;
 }
