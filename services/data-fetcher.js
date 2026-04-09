@@ -141,11 +141,12 @@ async function getPriceData(ticker) {
     const cached = fromCache(cacheKey);
     if (cached) return cached;
 
-    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
 
     if (isKR) {
+        const yfTicker = /^[0-9]{6}$/.test(ticker) ? `${ticker}.KS` : ticker;
         const data = await withFallback('PriceKR', [
-            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooPrice(ticker)]
+            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooPrice(yfTicker)]
         ]);
         if (data) toCache(cacheKey, data);
         return data;
@@ -229,11 +230,12 @@ async function getPriceHistory(ticker) {
     const cached = fromCache(cacheKey);
     if (cached) return cached;
 
-    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
 
     if (isKR) {
+        const yfTicker = /^[0-9]{6}$/.test(ticker) ? `${ticker}.KS` : ticker;
         const data = await withFallback('HistoryKR', [
-            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooHistory(ticker, 90)]
+            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooHistory(yfTicker, 90)]
         ]);
         if (data) toCache(cacheKey, data);
         return data;
@@ -808,7 +810,7 @@ const ORCHESTRATION_TTL = 60 * 1000;
  */
 async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
     const query = companyName || ticker;
-    const isKR = ticker.endsWith('.KS');
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
 
     const cacheKey = `ALL_${ticker}`;
     const cached = orchestrationCache.get(cacheKey);
@@ -1053,7 +1055,7 @@ async function fetchDeepMetric(ticker, metricClass) {
     console.log(`[DeepMetric] 🔍 ${ticker}의 ${metricClass} 지표 심층 탐색 시작...`);
 
     // 한국 티커 .KS 처리: US 전용 API에서는 순수 숫자만 사용
-    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
     const usTicker = isKR ? ticker.replace(/\.(KS|KQ)$/, '') : ticker;
 
     // 문자열 값 안전 파싱 헬퍼 ("10.8%" → 10.8, "5.79" → 5.79)

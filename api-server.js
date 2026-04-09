@@ -100,25 +100,8 @@ app.use((req, res, next) => {
     next();
 });
 
-// ── 정적 파일 서빙 (웹앱 프론트엔드) ──────────────────────────────
-const webappDist = path.join(__dirname, 'yeri-webapp', 'dist');
-
-// hash 기반 JS/CSS는 1년 캐시 (immutable) — Vite가 파일명에 hash를 넣으므로 안전
-app.use('/assets', express.static(path.join(webappDist, 'assets'), {
-    maxAge: '365d',
-    immutable: true
-}));
-// index.html 등 나머지는 항상 최신 확인 (no-cache)
-app.use(express.static(webappDist, {
-    maxAge: 0,
-    setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html')) {
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        }
-    }
-}));
+// ── 정적 파일 서빙 (웹앱 프론트엔드 - 연결 해제됨) ──────────────────────────────
+// 로컬 테스트 화면(Vite) 서빙 제거: Vercel 운영망과 혼선 방지 목적으로 localhost 직접 렌더링을 차단합니다.
 
 // Render는 PORT 환경변수를 자동 주입 — API_PORT fallback 유지
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
@@ -135,10 +118,8 @@ app.get('/api/version', (req, res) => {
         commitHash: deployedHash,
         deployedAt: new Date().toISOString(),
         nodeEnv: process.env.NODE_ENV || 'development',
-        distExists: require('fs').existsSync(webappDist),
-        distFiles: require('fs').existsSync(path.join(webappDist, 'assets'))
-            ? require('fs').readdirSync(path.join(webappDist, 'assets'))
-            : [],
+        // distExists 항목 등 레거시 제거완료
+
         envKeys: {
             finnhub: !!process.env.FINNHUB_API_KEY,
             fmp: !!process.env.FMP_API_KEY,
@@ -843,13 +824,13 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
     const USD_KRW_RATE = 1400; // 정적 환율 방어 기준
     let hasKRW = false;
     enriched.forEach(h => {
-        if (h.ticker.endsWith('.KS') || h.ticker.endsWith('.KQ')) hasKRW = true;
+        if (h.ticker.endsWith('.KS') || h.ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(h.ticker)) hasKRW = true;
     });
 
     const displayCurrency = hasKRW ? 'KRW' : 'USD';
     const normalize = (amount, ticker) => {
         if (!amount) return 0;
-        const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+        const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
         if (displayCurrency === 'KRW' && !isKR) return amount * USD_KRW_RATE;
         if (displayCurrency === 'USD' && isKR) return amount / USD_KRW_RATE;
         return amount;
