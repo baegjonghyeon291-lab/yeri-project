@@ -1186,7 +1186,8 @@ app.get('/api/portfolio/:userId/briefing', async (req, res) => {
         const totalPLPct = totalInvested > 0 ? ((totalPL / totalInvested) * 100).toFixed(2) : '0';
 
         const today = new Date().toLocaleDateString('ko-KR');
-        const currency = '$';
+        const hasKRW = enriched.some(h => /^\d{6}$/.test(h.ticker) || (h.ticker && h.ticker.endsWith('.KS')));
+        const currency = hasKRW ? '₩' : '$';
 
         const holdingLines = enriched.map(h => {
             const cur = h.currentPrice != null ? `${currency}${Number(h.currentPrice).toLocaleString()}` : '가격 미확인';
