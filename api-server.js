@@ -162,7 +162,8 @@ app.get('/api/health', (req, res) => {
 // ── 관리용 API (세션 조회 + 데이터 수정) ──────────────────────────
 app.get('/api/admin/sessions', (req, res) => {
     try {
-        const data = JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR || path.join(__dirname, 'data'), 'portfolio.json'), 'utf8'));
+        const storePath = require('path').join(process.env.DATA_DIR || require('path').join(__dirname, 'data'), 'portfolio.json');
+        const data = JSON.parse(require('fs').readFileSync(storePath, 'utf8'));
         const sessions = Object.entries(data).map(([id, val]) => ({
             sessionId: id,
             holdingCount: (val.holdings || []).length,
@@ -178,19 +179,9 @@ app.post('/api/admin/fix-avgprice', (req, res) => {
     try {
         const { sessionId, ticker, newAvgPrice } = req.body;
         if (!sessionId || !ticker || !newAvgPrice) return res.status(400).json({ error: 'sessionId, ticker, newAvgPrice required' });
-        const filePath = path.join(process.env.DATA_DIR || path.join(__dirname, 'data'), 'portfolio.json');
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        if (!data[sessionId]) return res.status(404).json({ error: 'session not found' });
-        const holding = data[sessionId].holdings.find(h => h.ticker === ticker.toUpperCase());
-        if (!holding) return res.status(404).json({ error: 'ticker not found' });
-        const oldPrice = holding.avgPrice;
-        holding.avgPrice = Number(newAvgPrice);
-        // 매매기록의 최초 등록도 수정
-        if (holding.trades && holding.trades.length > 0) {
-            holding.trades[0].price = Number(newAvgPrice);
-        }
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-        res.json({ ok: true, ticker: holding.ticker, oldAvgPrice: oldPrice, newAvgPrice: holding.avgPrice });
+        const result = portfolioStore.update(sessionId, ticker, { avgPrice: Number(newAvgPrice) });
+        if (!result) return res.status(404).json({ error: 'session or ticker not found' });
+        res.json({ ok: true, ticker, newAvgPrice: Number(newAvgPrice) });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
