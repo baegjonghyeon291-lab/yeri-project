@@ -1,10 +1,10 @@
 {
   "webapp": {
-    "IREN_takeProfitPct": "2026-04-07T05:05:27.203Z",
-    "IREN_totalValueAbove": "2026-04-07T05:10:09.435Z",
-    "IREN_priceAbove": "2026-04-07T05:24:15.519Z",
-    "IREN_maxWeight": "2026-04-07T05:24:15.520Z",
-    "IREN_badge_경고": "2026-04-07T05:24:15.520Z"
+    "IREN_takeProfitPct": "2026-04-09T03:05:26.560Z",
+    "IREN_totalValueAbove": "2026-04-09T03:05:26.609Z",
+    "IREN_priceAbove": "2026-04-09T03:05:26.559Z",
+    "IREN_maxWeight": "2026-04-09T03:05:26.610Z",
+    "IREN_badge_경고": "2026-04-09T03:05:26.610Z"
   },
   "test-predict": {
     "IREN_badge_경고": "2026-04-07T05:38:41.354Z",

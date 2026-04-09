@@ -35,10 +35,84 @@
           "predictWeightRisk": true
         },
         "addedAt": "2026-04-07T05:37:44.302Z"
+      },
+      {
+        "ticker": "005930",
+        "name": "005930",
+        "quantity": 5,
+        "avgPrice": 80000,
+        "buyDate": null,
+        "memo": null,
+        "tradeReason": null,
+        "targetPrice": null,
+        "lossPrice": null,
+        "viewTerm": "단기",
+        "alerts": {
+          "enabled": false
+        },
+        "trades": [
+          {
+            "id": "1775704279503",
+            "type": "buy",
+            "date": "2026-04-09",
+            "price": 80000,
+            "quantity": 5,
+            "memo": "최초 등록"
+          }
+        ],
+        "addedAt": "2026-04-09T03:11:19.503Z"
+      }
+    ],
+    "history": [
+      {
+        "date": "2026-04-09T06:34:05.473Z",
+        "totalValue": 6176200,
+        "totalProfitLoss": 4656200,
+        "totalProfitLossPct": 306.33,
+        "healthScore": 65
       }
     ]
   },
   "test-predict": {
     "holdings": []
+  },
+  "yeri-default": {
+    "holdings": [
+      {
+        "ticker": "028260",
+        "name": "삼성물산",
+        "quantity": 20,
+        "avgPrice": 120000,
+        "buyDate": null,
+        "memo": null,
+        "tradeReason": null,
+        "targetPrice": null,
+        "lossPrice": null,
+        "viewTerm": "단기",
+        "alerts": {
+          "enabled": false
+        },
+        "trades": [
+          {
+            "id": "1775712634521",
+            "type": "buy",
+            "date": "2026-04-09",
+            "price": 120000,
+            "quantity": 10,
+            "memo": "최초 등록"
+          }
+        ],
+        "addedAt": "2026-04-09T05:30:34.521Z"
+      }
+    ],
+    "history": [
+      {
+        "date": "2026-04-09T06:33:46.530Z",
+        "totalValue": 6000000,
+        "totalProfitLoss": 3600000,
+        "totalProfitLossPct": 150,
+        "healthScore": 47
+      }
+    ]
   }
 }

@@ -1,6 +1,46 @@
 {
   "webapp": [
     {
+      "id": "1775703926610ddgp",
+      "type": "STATUS_WARNING",
+      "message": "🚨 IREN의 상태 배지가 [경고](으)로 악화되었습니다. 예리의 대응 전략을 확인해 보세요!",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-09T03:05:26.610Z"
+    },
+    {
+      "id": "1775703926609mmpg",
+      "type": "WEIGHT_WARNING",
+      "message": "⚠️ IREN 비중이 설정한 한도(30%)를 초과했습니다. 포트폴리오 리스크 관리가 필요할 수 있습니다. (현재 비중: 100.0%)",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-09T03:05:26.609Z"
+    },
+    {
+      "id": "1775703926609y62a",
+      "type": "TOTAL_VALUE",
+      "message": "💰 달성! IREN 보유 종목의 총 평가금액이 목표치인 $3,000을 돌파했습니다! (현재 $3,683)",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-09T03:05:26.609Z"
+    },
+    {
+      "id": "1775703926560ul3o",
+      "type": "TAKE_PROFIT",
+      "message": "🎉 대공개! IREN 수익률이 목표치인 +20%를 달성했습니다! (현재 +360.38%)",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-09T03:05:26.560Z"
+    },
+    {
+      "id": "1775703926557wyqz",
+      "type": "PRICE_ABOVE",
+      "message": "📈 IREN 현재가가 설정한 돌파 가격($15)을 돌파했습니다! (현재 $36.83)",
+      "ticker": "IREN",
+      "isRead": false,
+      "createdAt": "2026-04-09T03:05:26.557Z"
+    },
+    {
       "id": "1775539455520ibxr",
       "type": "STATUS_WARNING",
       "message": "🚨 IREN의 상태 배지가 [경고](으)로 악화되었습니다. 예리의 대응 전략을 확인해 보세요!",

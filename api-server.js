@@ -822,27 +822,35 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
     }
 
     const USD_KRW_RATE = 1400; // 정적 환율 방어 기준
-    let hasKRW = false;
-    enriched.forEach(h => {
-        if (h.ticker.endsWith('.KS') || h.ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(h.ticker)) hasKRW = true;
-    });
+    const isKR = (ticker) => ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
+    let hasKRW = enriched.some(h => isKR(h.ticker));
 
     const displayCurrency = hasKRW ? 'KRW' : 'USD';
     const normalize = (amount, ticker) => {
         if (!amount) return 0;
-        const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
-        if (displayCurrency === 'KRW' && !isKR) return amount * USD_KRW_RATE;
-        if (displayCurrency === 'USD' && isKR) return amount / USD_KRW_RATE;
+        if (displayCurrency === 'KRW' && !isKR(ticker)) return amount * USD_KRW_RATE;
+        if (displayCurrency === 'USD' && isKR(ticker)) return amount / USD_KRW_RATE;
         return amount;
     };
 
-    const totalInvested = enriched.reduce((s, h) => s + normalize(h.investedAmount, h.ticker), 0);
-    const totalValue = enriched.reduce((s, h) => s + normalize((h.currentValue || h.investedAmount), h.ticker), 0);
+    // 각 종목에 displayCurrency 기준 표시용 값 추가
+    enriched.forEach(h => {
+        h.currency = isKR(h.ticker) ? 'KRW' : 'USD';
+        h.displayAvgPrice = Math.round(normalize(h.avgPrice, h.ticker));
+        h.displayCurrentPrice = h.currentPrice != null ? Math.round(normalize(h.currentPrice, h.ticker)) : null;
+        h.displayInvested = Math.round(normalize(h.investedAmount, h.ticker));
+        h.displayValue = h.currentValue != null ? Math.round(normalize(h.currentValue, h.ticker)) : null;
+        h.displayPL = h.profitLoss != null ? Math.round(normalize(h.profitLoss, h.ticker)) : null;
+        // 수익률은 환율 변환 불필요 (퍼센트이므로 동일)
+    });
+
+    const totalInvested = enriched.reduce((s, h) => s + h.displayInvested, 0);
+    const totalValue = enriched.reduce((s, h) => s + (h.displayValue || h.displayInvested), 0);
     const totalPL = totalValue - totalInvested;
-    const totalAnnualDividend = enriched.reduce((s, h) => s + normalize(((h.quantity * (h.dividend?.rate || 0)) || 0), h.ticker), 0);
+    const totalAnnualDividend = enriched.reduce((s, h) => s + Math.round(normalize(((h.quantity * (h.dividend?.rate || 0)) || 0), h.ticker)), 0);
 
     enriched.forEach(h => {
-        const normVal = normalize((h.currentValue || h.investedAmount), h.ticker);
+        const normVal = h.displayValue || h.displayInvested;
         h.weight = totalValue > 0 && normVal != null
             ? Math.round((normVal / totalValue) * 10000) / 100
             : null;
