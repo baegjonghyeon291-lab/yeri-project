@@ -3,6 +3,8 @@
  * Maps Korean company names / tickers / codes and sector keywords.
  */
 const { KOREAN_TICKER_MAP } = require('./korean-tickers');
+const fs = require('fs');
+const path = require('path');
 
 const KR_COMPANY_MAP = {
     // 삼성 그룹
@@ -491,6 +493,30 @@ for (const [k, v] of Object.entries(KOREAN_TICKER_MAP)) {
     else US_COMPANY_MAP[k] = v;
 }
 
+try {
+    const krDataPath = path.join(__dirname, '../data/kr_tickers.json');
+    if (fs.existsSync(krDataPath)) {
+        const krMaster = JSON.parse(fs.readFileSync(krDataPath, 'utf8'));
+        for (const item of krMaster) {
+            const code = item.Code;
+            const name = item.Name;
+            const isPreferred = name.endsWith('우') || name.endsWith('우B');
+            const suffix = item.Market === 'KOSPI' ? '.KS' : (item.Market === 'KOSDAQ' ? '.KQ' : '.KS');
+            const ticker = code + suffix;
+            const info = {
+                ticker: ticker,
+                corpCode: null,
+                name: name,
+                market: 'KR'
+            };
+            KR_COMPANY_MAP[name.replace(/\s/g, '').toLowerCase()] = info;
+            KR_COMPANY_MAP[code] = info;
+        }
+    }
+} catch (e) {
+    console.error("[ticker-util] kr_tickers.json 로드 실패:", e.message);
+}
+
 // ──────────────────────────────────────────────────────────
 // LEVERAGED ETF DETECTION
 // ──────────────────────────────────────────────────────────
@@ -897,14 +923,20 @@ function decomposeKorean(str) {
     return arr;
 }
 
-// 유사도 점수 (0~1, 높을수록 유사) - 자모 분해 배열 기준
+// 유사도 점수 (0~1, 높을수록 유사) - 자모 분해 배열 및 앞부분 일치 기준
 function similarityScore(input, target) {
+    if (input === target) return 1.0;
+    if (target.startsWith(input)) return 0.90;
+    if (input.startsWith(target)) return 0.85;
+    if (target.includes(input)) return 0.80;
+
     const a = decomposeKorean(input);
     const b = decomposeKorean(target);
     const maxLen = Math.max(a.length, b.length);
-    if (maxLen === 0) return 1;
+    if (maxLen === 0) return 1.0;
     const dist = levenshteinDistance(a, b);
-    return 1 - dist / maxLen;
+    // Fuzzy 매칭은 과도한 편향을 막기 위해 0.7 이하로 강력하게 패널티 부여
+    return (1 - dist / maxLen) * 0.70;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -1147,16 +1179,7 @@ function suggestCandidates(text) {
         return cached;
     }
 
-    // 1) 정확 매칭 (resolveStock이 3단계 엔진 통과)
     const exact = resolveStock(cleaned);
-    if (exact) {
-        const result = {
-            input: text, resolved: exact, confidence: 1.0, tier: 'HIGH',
-            candidates: [{ ticker: exact.ticker, name: exact.name, market: exact.market, confidence: 1.0, tier: 'HIGH' }],
-        };
-        setCache(cacheKey, result);
-        return result;
-    }
 
     // 2) Levenshtein fuzzy 스코어링
     const normalized = normalize(text);
@@ -1181,7 +1204,14 @@ function suggestCandidates(text) {
         if (seen.has(e.info.ticker)) return false;
         seen.add(e.info.ticker);
         return true;
-    }).slice(0, 5);
+    }).slice(0, 15); // 확장된 반환 개수 (15개)
+
+    // exact match가 존재하면 리스트 맨 앞에 보장 배치
+    if (exact) {
+        const exactIndex = unique.findIndex(u => u.info.ticker === exact.ticker);
+        if (exactIndex !== -1) unique.splice(exactIndex, 1);
+        unique.unshift({ key: text, info: exact, market: exact.market, score: 1.0 });
+    }
 
     if (!unique.length) {
         const empty = { input: text, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };

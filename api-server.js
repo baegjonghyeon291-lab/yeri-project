@@ -1432,7 +1432,8 @@ app.get('/api/suggest', async (req, res) => {
 function mergeSuggestResults(localResult, apiCandidates) {
     const seen = new Set((localResult.candidates || []).map(c => c.ticker));
     const newFromApi = (apiCandidates || []).filter(c => !seen.has(c.ticker));
-    const allCandidates = [...(localResult.candidates || []), ...newFromApi].slice(0, 5);
+    const allCandidates = [...(localResult.candidates || []), ...newFromApi].slice(0, 15);
+
 
     if (!allCandidates.length) {
         return { input: localResult.input, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
