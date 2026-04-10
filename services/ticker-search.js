@@ -190,7 +190,7 @@ function dedupeAndRank(results) {
             return true;
         })
         .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, 5);
+        .slice(0, 10);
 }
 
 // ─────────────────────────────────────────────

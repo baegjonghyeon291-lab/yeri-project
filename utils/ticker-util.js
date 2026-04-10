@@ -1180,31 +1180,77 @@ function suggestCandidates(text) {
     }
 
     const exact = resolveStock(cleaned);
-
-    // 2) Levenshtein fuzzy 스코어링
     const normalized = normalize(text);
-    if (normalized.length < 2) return { input: text, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
+    if (normalized.length < 1) return { input: text, resolved: null, confidence: 0, tier: 'LOW', candidates: [] };
 
+    // ════════════════════════════════════════════════════════
+    // 한국 주식 마스터 기반 결정론적 매칭 (정확→prefix→포함)
+    // Levenshtein fuzzy보다 먼저 실행하여 비주류 종목 인식 보장
+    // ════════════════════════════════════════════════════════
+    const krDeterministic = [];
+    const seenTickers = new Set();
+    const qLower = normalized.toLowerCase().replace(/\s/g, '');
+
+    for (const [key, info] of Object.entries(KR_COMPANY_MAP)) {
+        if (!info || !info.ticker) continue;
+        const keyNorm = key.toLowerCase().replace(/\s/g, '');
+        const nameNorm = (info.name || '').toLowerCase().replace(/\s/g, '');
+        const code = info.ticker.replace(/\.(KS|KQ)$/i, '');
+
+        let score = 0;
+
+        // 종목코드 완전일치
+        if (code === qLower) score = 1.0;
+        // 이름/키 완전일치
+        else if (keyNorm === qLower || nameNorm === qLower) score = 0.98;
+        // 이름/키 prefix 일치
+        else if (keyNorm.startsWith(qLower) || nameNorm.startsWith(qLower)) score = 0.90;
+        // 종목코드 prefix 일치
+        else if (code.startsWith(qLower) && qLower.length >= 3) score = 0.88;
+        // 이름/키 포함 일치
+        else if ((keyNorm.includes(qLower) || nameNorm.includes(qLower)) && qLower.length >= 2) score = 0.75;
+
+        if (score > 0 && !seenTickers.has(info.ticker)) {
+            seenTickers.add(info.ticker);
+            krDeterministic.push({
+                key, info, market: 'KR', score
+            });
+        }
+    }
+
+    // 정렬: score 높은 순 → 이름 짧은 순
+    krDeterministic.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (a.info.name || '').length - (b.info.name || '').length;
+    });
+
+    // ════════════════════════════════════════════════════════
+    // US/ETF 사전 + 나머지 KR도 fuzzy 스코어링 (기존 로직)
+    // ════════════════════════════════════════════════════════
     const allEntries = [
         ...Object.entries(US_COMPANY_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
         ...Object.entries(ETF_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
-        ...Object.entries(KR_COMPANY_MAP).map(([k, v]) => ({ key: k, info: v, market: 'KR' })),
         ...Object.entries(ABBREVIATION_MAP).map(([k, v]) => ({ key: k, info: v, market: 'US' })),
     ];
 
-    const scored = allEntries
+    const fuzzyScored = allEntries
         .filter(e => e.key.length >= 2)
         .map(e => ({ ...e, score: similarityScore(normalized, e.key) }))
         .filter(e => e.score >= 0.3)
         .sort((a, b) => b.score - a.score);
 
-    // 중복 ticker 제거
-    const seen = new Set();
-    const unique = scored.filter(e => {
-        if (seen.has(e.info.ticker)) return false;
-        seen.add(e.info.ticker);
-        return true;
-    }).slice(0, 15); // 확장된 반환 개수 (15개)
+    // 병합: KR 결정론적 결과 우선 + US/ETF fuzzy 보충
+    const merged = [...krDeterministic];
+    for (const f of fuzzyScored) {
+        if (!seenTickers.has(f.info.ticker)) {
+            seenTickers.add(f.info.ticker);
+            merged.push(f);
+        }
+    }
+
+    // 최종 정렬 (score 내림차순)
+    merged.sort((a, b) => b.score - a.score);
+    const unique = merged.slice(0, 15);
 
     // exact match가 존재하면 리스트 맨 앞에 보장 배치
     if (exact) {
