@@ -37,8 +37,12 @@
         "addedAt": "2026-04-07T05:37:44.302Z"
       },
       {
-        "ticker": "005930",
-        "name": "005930",
+        "ticker": "005930.KS",
+        "name": "삼성전자",
+        "market": "KR",
+        "currency": "KRW",
+        "uiCurrency": "₩",
+        "isKorean": true,
         "quantity": 5,
         "avgPrice": 80000,
         "buyDate": null,
@@ -79,8 +83,12 @@
   "yeri-default": {
     "holdings": [
       {
-        "ticker": "028260",
+        "ticker": "028260.KS",
         "name": "삼성물산",
+        "market": "KR",
+        "currency": "KRW",
+        "uiCurrency": "₩",
+        "isKorean": true,
         "quantity": 20,
         "avgPrice": 120000,
         "buyDate": null,
