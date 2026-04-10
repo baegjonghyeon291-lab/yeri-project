@@ -12,6 +12,7 @@
  */
 const axios = require('axios');
 const yahoo = require('./yahoo-finance-helper');
+const naver = require('./naver-finance-helper');
 
 // ─────────────────────────────────────────────
 // API 호출 통계 추적 (세션당)
@@ -848,9 +849,15 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
         console.log(`[DataFetcher] ⚡ ${ticker} 이력 누락 → Yahoo 직접 재시도`);
         history = await safeGet('History/Yahoo-retry', () => yahoo.getYahooHistory(ticker));
     }
-    if (!fundamentals) {
-        console.log(`[DataFetcher] ⚡ ${ticker} 재무 누락 → Yahoo 직접 재시도`);
-        fundamentals = await safeGet('Fund/Yahoo-retry', () => yahoo.getYahooFundamentals(ticker));
+    if (!fundamentals || isKR) {
+        if (isKR) {
+            console.log(`[DataFetcher] ⚡ ${ticker} 한국 주식 재무 → Naver 파이프라인으로 조회`);
+            const nav = await safeGet('Fund/Naver', () => naver.getNaverFundamentals(ticker));
+            if (nav) fundamentals = { ...fundamentals, ...nav, source: nav.source || 'Naver Finance' };
+        } else if (!fundamentals) {
+            console.log(`[DataFetcher] ⚡ ${ticker} 재무 누락 → Yahoo 직접 재시도`);
+            fundamentals = await safeGet('Fund/Yahoo-retry', () => yahoo.getYahooFundamentals(ticker));
+        }
     }
 
     // companyName 보강 — fundamentals에서 가져온 이름 사용

@@ -255,6 +255,7 @@ function generateDataReport(data, mode = 'full') {
     lines.push('');
     lines.push(`**PER:** ${f.peRatio != null ? f.peRatio : '데이터 없음'} | **선행PER:** ${f.forwardPE != null ? f.forwardPE : '데이터 없음'}`);
     lines.push(`**EPS:** ${f.eps != null ? f.eps : '데이터 없음'} | **PBR:** ${f.pbRatio != null ? f.pbRatio : '데이터 없음'}`);
+    lines.push(`**BPS:** ${f.bps != null ? f.bps : '데이터 없음'} | **배당수익률:** ${f.dividendYield != null ? (f.dividendYield * 100).toFixed(2) + '%' : '데이터 없음'}`);
     lines.push(`**ROE:** ${f.roe != null ? f.roe : '데이터 없음'} | **D/E:** ${f.debtToEquity != null ? f.debtToEquity : '데이터 없음'}`);
     lines.push(`**매출:** ${f.revenue != null ? fmtLargeNum(f.revenue, currency) : '데이터 없음'} | **순이익:** ${f.netIncome != null ? fmtLargeNum(f.netIncome, currency) : '데이터 없음'}`);
     lines.push(`**영업이익:** ${f.operatingIncome != null ? fmtLargeNum(f.operatingIncome, currency) : '데이터 없음'}`);
@@ -859,8 +860,40 @@ const STOCK_PROMPT_TEMPLATE = `당신은 데이터 기반 투자 참고 도구 "
 ⚠️ 단정형 투자 권유 금지. 본 의견은 API 데이터 기반 자동 생성이며 참고용입니다.
 `;
 
+const STOCK_PROMPT_TEMPLATE_KR = STOCK_PROMPT_TEMPLATE.replace(
+`## 📋 핵심 팩트
+(⚠️ 모바일 가독성을 위해 절대 표를 생성하지 말고, 아래 형태의 세로형 리스트로 작성하세요)
+(⚠️ 숫자 포맷 엄수: 금액 -$1.25B / 비율 153.0% / 배수 24.4배 / 가격 $39.98 / 보조지표 37.2 형식으로 소수점 통일)
+- 현재가: (포맷팅된 값) (출처: <RawData> 출처)
+- 전일비: (포맷팅된 값)% (출처: <RawData> 출처)
+- PER: (포맷팅된 값)배 (출처: <RawData> 출처)
+- EPS: (포맷팅된 값) (출처: <RawData> 출처)
+- ROE: (포맷팅된 값)% (출처: <RawData> 출처)
+- D/E (부채비율): (포맷팅된 값)% (출처: <RawData> 출처)
+- FCF: (포맷팅된 값) (출처: <RawData> 출처)
+- RSI(14): (포맷팅된 값) (출처: <RawData> 출처)`,
+`## 📋 핵심 팩트
+(⚠️ 모바일 가독성을 위해 절대 표를 생성하지 말고, 아래 형태의 세로형 리스트로 작성하세요)
+(⚠️ 숫자 포맷 엄수: 금액 ₩53,100 / 비율 153.0% / 배수 24.4배 / 보조지표 37.2 형식으로 소수점 통일)
+- 현재가: (포맷팅된 값) (출처: <RawData> 출처)
+- 전일비: (포맷팅된 값)% (출처: <RawData> 출처)
+- 시가총액: (포맷팅된 값) (출처: <RawData> 출처)
+- PER: (포맷팅된 값)배 (출처: <RawData> 출처)
+- PBR: (포맷팅된 값)배 (출처: <RawData> 출처)
+- EPS: (포맷팅된 값) (출처: <RawData> 출처)
+- BPS: (포맷팅된 값) (출처: <RawData> 출처)
+- ROE: (포맷팅된 값)% (출처: <RawData> 출처)
+- 부채비율: (포맷팅된 값)% (출처: <RawData> 출처)
+- 배당수익률: (포맷팅된 값)% (출처: <RawData> 출처)
+- RSI(14): (포맷팅된 값) (출처: <RawData> 출처)`);
+
+function getPromptTemplate(data) {
+    const isKr = (data.ticker || '').endsWith('.KS') || (data.ticker || '').endsWith('.KQ') || data.market === 'KR';
+    return isKr ? STOCK_PROMPT_TEMPLATE_KR : STOCK_PROMPT_TEMPLATE;
+}
+
 async function analyzeStock(data, useDeep = false, tone = 'normal') {
-    const prompt = `${STOCK_PROMPT_TEMPLATE}\n\n${buildContextForLLM(data)}`;
+    const prompt = `${getPromptTemplate(data)}\n\n${buildContextForLLM(data)}`;
     return callOpenAI(prompt, useDeep, tone);
 }
 
@@ -870,12 +903,12 @@ async function analyzeStockCasual(data, useDeep = false, tone = 'normal') {
 }
 
 async function analyzeStockBuyTiming(data, useDeep = false, tone = 'normal') {
-    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] '💡 최종 투자 관점 및 판단' 셀에서 단기 매수 적절성(Buy Timing)과 목표가/손절가를 명확히 짚어주세요.\n\n${buildContextForLLM(data)}`;
+    const prompt = `${getPromptTemplate(data)}\n[💡 추가 지시] '💡 최종 투자 관점 및 판단' 셀에서 단기 매수 적절성(Buy Timing)과 목표가/손절가를 명확히 짚어주세요.\n\n${buildContextForLLM(data)}`;
     return callOpenAI(prompt, useDeep, tone);
 }
 
 async function analyzeStockSellTiming(data, useDeep = false, tone = 'normal') {
-    const prompt = `${STOCK_PROMPT_TEMPLATE}\n[💡 추가 지시] '💡 최종 투자 관점 및 판단' 셀에서 매도 및 익절/손절(Sell Timing) 관점을 중점적으로 짚어주세요.\n\n${buildContextForLLM(data)}`;
+    const prompt = `${getPromptTemplate(data)}\n[💡 추가 지시] '💡 최종 투자 관점 및 판단' 셀에서 매도 및 익절/손절(Sell Timing) 관점을 중점적으로 짚어주세요.\n\n${buildContextForLLM(data)}`;
     return callOpenAI(prompt, useDeep, tone);
 }
 
