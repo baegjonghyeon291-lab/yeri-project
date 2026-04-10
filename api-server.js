@@ -843,7 +843,14 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
         await new Promise(r => setTimeout(r, 200));
     }
 
-    const USD_KRW_RATE = 1400; // 정적 환율 방어 기준
+    let USD_KRW_RATE = 1400; // 기본 Fallback
+    try {
+        const fx = await yahoo.getYahooPrice('KRW=X');
+        if (fx && fx.current) USD_KRW_RATE = fx.current;
+    } catch (e) {
+        console.warn('[FX] 실시간 환율 조회 실패, 기준환율 1400원 사용');
+    }
+
     const isKR = (h) => h.isKorean === true || h.market === 'KR' || h.ticker.endsWith('.KS') || h.ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(h.ticker);
     let hasKRW = enriched.some(h => isKR(h));
 
@@ -863,6 +870,11 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
         h.displayInvested = Math.round(normalize(h.investedAmount, h));
         h.displayValue = h.currentValue != null ? Math.round(normalize(h.currentValue, h)) : null;
         h.displayPL = h.profitLoss != null ? Math.round(normalize(h.profitLoss, h)) : null;
+        
+        // 포트폴리오 분석 엔진에서 사용할 공통 KRW 환산 값 (FX 믹스 방지)
+        const krwNormalize = (amt) => isKR(h) ? amt : (amt || 0) * USD_KRW_RATE;
+        h.krwInvestedAmount = krwNormalize(h.investedAmount);
+        h.krwCurrentValue = krwNormalize(h.currentValue);
         // 수익률은 환율 변환 불필요 (퍼센트이므로 동일)
     });
 
@@ -1193,60 +1205,23 @@ app.get('/api/portfolio/:userId/history', (req, res) => {
 // GET /api/portfolio/:userId/briefing — GPT 포트폴리오 브리핑
 app.get('/api/portfolio/:userId/briefing', async (req, res) => {
     try {
-        const holdings = portfolioStore.get(req.params.userId);
-        if (!holdings.length) {
+        const snap = await buildPortfolioSnapshot(req.params.userId);
+        if (!snap || snap.holdings.length === 0) {
             return res.json({ empty: true, report: '', message: '보유종목이 없습니다. 종목을 먼저 추가해주세요.' });
         }
 
-        // 실시간 데이터 수집 (순차)
-        const enriched = [];
-        for (const h of holdings) {
-            try {
-                const data = await fetchAllStockData(h.ticker, h.name);
-                const currentPrice = data.price?.current ?? null;
-                const investedAmount = h.quantity * h.avgPrice;
-                const currentValue = currentPrice != null ? h.quantity * currentPrice : null;
-                const profitLoss = currentValue != null ? currentValue - investedAmount : null;
-                const profitLossPct = investedAmount > 0 && profitLoss != null
-                    ? ((profitLoss / investedAmount) * 100).toFixed(2)
-                    : '0';
-
-                enriched.push({
-                    ...h,
-                    currentPrice,
-                    changePct: data.price?.changePct ?? null,
-                    investedAmount,
-                    currentValue,
-                    profitLoss,
-                    profitLossPct,
-                    rsi: data.technical?.rsi ?? null,
-                    ema20: data.technical?.ema20 ?? null,
-                    newsCount: (data.news || []).length,
-                    topNews: (data.news || []).slice(0, 2).map(n => n.title),
-                });
-            } catch (e) {
-                enriched.push({ ...h, currentPrice: null, error: e.message });
-            }
-            await new Promise(r => setTimeout(r, 300));
-        }
-
-        const totalInvested = enriched.reduce((s, h) => s + (h.investedAmount || 0), 0);
-        const totalValue = enriched.reduce((s, h) => s + (h.currentValue || h.investedAmount || 0), 0);
-        const totalPL = totalValue - totalInvested;
-        const totalPLPct = totalInvested > 0 ? ((totalPL / totalInvested) * 100).toFixed(2) : '0';
-
         const today = new Date().toLocaleDateString('ko-KR');
-        const hasKRW = enriched.some(h => /^\d{6}$/.test(h.ticker) || (h.ticker && h.ticker.endsWith('.KS')));
-        const currency = hasKRW ? '₩' : '$';
+        const currency = snap.summary.uiCurrency;
 
-        const holdingLines = enriched.map(h => {
-            const cur = h.currentPrice != null ? `${currency}${Number(h.currentPrice).toLocaleString()}` : '가격 미확인';
+        const holdingLines = snap.holdings.map(h => {
+            const sym = h.currency === 'KRW' ? '₩' : '$';
+            const cur = h.displayCurrentPrice != null ? `${sym}${Number(h.displayCurrentPrice).toLocaleString()}` : '가격 미확인';
             const plSign = h.profitLoss > 0 ? '+' : '';
             return [
                 `[${h.name} (${h.ticker})]`,
-                `보유: ${h.quantity}주 | 평단가: ${currency}${h.avgPrice} | 현재가: ${cur}`,
-                `투자금: ${currency}${Math.round(h.investedAmount).toLocaleString()} | 평가액: ${h.currentValue != null ? currency + Math.round(h.currentValue).toLocaleString() : '미확인'}`,
-                `수익률: ${plSign}${h.profitLossPct}% (${plSign}${currency}${h.profitLoss != null ? Math.round(h.profitLoss).toLocaleString() : '미확인'})`,
+                `보유: ${h.quantity}주 | 평단가: ${sym}${h.avgPrice} | 현재가: ${sym}${h.currentPrice || 0}`,
+                `투자금(원화환산): ₩${Math.round(h.krwInvestedAmount || 0).toLocaleString()} | 평가액(원화환산): ₩${h.krwCurrentValue != null ? Math.round(h.krwCurrentValue).toLocaleString() : '미확인'}`,
+                `수익률: ${plSign}${h.profitLossPct}% (${plSign}${sym}${h.profitLoss != null ? Math.round(h.profitLoss).toLocaleString() : '미확인'})`,
                 h.rsi != null ? `RSI(14): ${Number(h.rsi).toFixed(1)}` : '',
                 h.topNews?.length ? `최근뉴스: ${h.topNews.join(' / ')}` : '최근뉴스: 없음',
             ].filter(Boolean).join('\n');
@@ -1255,16 +1230,16 @@ app.get('/api/portfolio/:userId/briefing', async (req, res) => {
         const prompt = `다음은 ${today} 기준 사용자의 실제 보유 포트폴리오 데이터야.
 
 [포트폴리오 전체 요약]
-총 투자금: ${currency}${Math.round(totalInvested).toLocaleString()}
-총 평가액: ${currency}${Math.round(totalValue).toLocaleString()}
-총 수익률: ${totalPL >= 0 ? '+' : ''}${totalPLPct}% (${totalPL >= 0 ? '+' : ''}${currency}${Math.round(totalPL).toLocaleString()})
-보유 종목 수: ${enriched.length}개
+총 투자금: ${currency}${Math.round(snap.summary.totalInvested).toLocaleString()}
+총 평가액: ${currency}${Math.round(snap.summary.totalValue).toLocaleString()}
+총 수익률: ${snap.summary.totalProfitLoss >= 0 ? '+' : ''}${snap.summary.totalProfitLossPct}% (${snap.summary.totalProfitLoss >= 0 ? '+' : ''}${currency}${Math.round(snap.summary.totalProfitLoss).toLocaleString()})
+보유 종목 수: ${snap.summary.holdingCount}개
 
 [보유 종목 상세]
 ${holdingLines}
 
 위 데이터를 바탕으로 사용자에게 제공할 포트폴리오 일일 브리핑 리포트를 작성해줘.
-⚠️ 중요 규칙: '총 수익률' 수치(${totalPL >= 0 ? '+' : ''}${totalPLPct}%)는 프론트엔드와 동일해야 하므로, 개별 종목 수익률을 이용해 가중 평균 등 새로운 수익률을 절대로 계산하지 말고 위 요약의 숫자를 그대로 인용할 것.
+⚠️ 중요 규칙: '총 수익률' 수치(${snap.summary.totalProfitLoss >= 0 ? '+' : ''}${snap.summary.totalProfitLossPct}%)는 프론트엔드와 동일해야 하므로, 개별 종목 수익률을 이용해 가중 평균 등 새로운 수익률을 절대로 계산하지 말고 위 요약의 숫자를 그대로 인용할 것.
 
 ━━━━━━━━━━━━━━━━━━━━━━
 [반드시 포함할 섹션]
@@ -1311,7 +1286,7 @@ ${holdingLines}
         const report = response.choices[0].message.content;
         console.log(`[Portfolio Briefing] 완료 (finish: ${response.choices[0].finish_reason}, tokens: ${response.usage?.completion_tokens || '?'})`);
 
-        res.json({ report, holdings: enriched, summary: { totalInvested, totalValue, totalProfitLoss: totalPL, totalProfitLossPct: totalPLPct } });
+        res.json({ report, holdings: snap.holdings, summary: snap.summary });
     } catch (err) {
         console.error('[Portfolio Briefing]', err.message);
         res.status(500).json({ error: `포트폴리오 브리핑 실패: ${err.message}` });

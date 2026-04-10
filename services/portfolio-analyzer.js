@@ -474,7 +474,7 @@ function analyzeAllocation(holdings, totalValue) {
     if (!totalValue || holdings.length === 0) return null;
     let overConcentrated = [];
     let allocations = holdings.map(h => {
-        const value = h.currentValue || (h.quantity * (h.currentPrice || h.avgPrice));
+        const value = h.krwCurrentValue != null ? h.krwCurrentValue : h.krwInvestedAmount;
         const weight = (value / totalValue) * 100;
         if (weight >= 30) overConcentrated.push({ ticker: h.ticker, weight });
         return { ticker: h.ticker, weight: Number(weight.toFixed(1)) };
@@ -496,7 +496,7 @@ function analyzeDiversification(holdings, totalValue) {
     let betaCount = 0;
 
     holdings.forEach(h => {
-        const value = h.currentValue || (h.quantity * (h.currentPrice || h.avgPrice));
+        const value = h.krwCurrentValue != null ? h.krwCurrentValue : h.krwInvestedAmount;
         const weight = (value / totalValue) * 100;
         
         const sector = (h.sector && h.sector !== 'Unknown') ? h.sector : '기타';
@@ -642,9 +642,9 @@ function calculateRebalancing(allocations, health, summary) {
 
 /** 일일 브리핑/한줄 요약 위젯 데이터 추가 */
 function buildDailyBriefing(summary, health, holdings) {
-    // 총 손익 정보
-    const totalInvested = holdings.reduce((sum, h) => sum + (h.investedAmount || 0), 0);
-    const totalValue = holdings.reduce((sum, h) => sum + (h.currentValue || h.investedAmount || 0), 0);
+    // 총 손익 정보 (환율이 적용된 krw 기반 합산)
+    const totalInvested = holdings.reduce((sum, h) => sum + (h.krwInvestedAmount || 0), 0);
+    const totalValue = holdings.reduce((sum, h) => sum + (h.krwCurrentValue != null ? h.krwCurrentValue : (h.krwInvestedAmount || 0)), 0);
     const profitLossPct = totalInvested > 0 ? ((totalValue / totalInvested) - 1) * 100 : 0;
     const plClass = profitLossPct >= 0 ? '+' : '';
 
@@ -677,7 +677,7 @@ function generateTodayActions(holdingsWithStatus, health, summary, diversificati
 
     // 1. 비중 과다 + 추세 악화
     holdingsWithStatus.forEach(h => {
-        const weight = h.currentValue ? (h.currentValue / holdingsWithStatus.reduce((s, x) => s + (x.currentValue || 0), 0)) * 100 : 0;
+        const weight = h.krwCurrentValue ? (h.krwCurrentValue / holdingsWithStatus.reduce((s, x) => s + (x.krwCurrentValue || 0), 0)) * 100 : 0;
         if (weight >= 30 && (h.status?.badge === '경고' || h.status?.badge === '리스크 높음')) {
             pushAction(h.ticker, '비중 즉각 축소', `너무 높은 비중(${weight.toFixed(1)}%)에 하락 추세가 심화 중입니다. 신속한 리스크 관리가 필요합니다.`, 'HIGH');
         }
@@ -697,7 +697,7 @@ function generateTodayActions(holdingsWithStatus, health, summary, diversificati
 
     // 4. 그냥 비중이 과도한 경우
     holdingsWithStatus.forEach(h => {
-        const weight = h.currentValue ? (h.currentValue / holdingsWithStatus.reduce((s, x) => s + (x.currentValue || 0), 0)) * 100 : 0;
+        const weight = h.krwCurrentValue ? (h.krwCurrentValue / holdingsWithStatus.reduce((s, x) => s + (x.krwCurrentValue || 0), 0)) * 100 : 0;
         if (weight >= 35) {
             pushAction(h.ticker, '비중 조절 (리밸런싱)', `포트폴리오 비중(${weight.toFixed(1)}%) 쏠림이 큽니다. 종목 분산을 고려하세요.`, 'MEDIUM');
         }
