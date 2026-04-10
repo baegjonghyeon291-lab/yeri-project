@@ -194,7 +194,8 @@ function generateDataReport(data, mode = 'full') {
     }
     const score = computeScore(data);
     const today = new Date().toLocaleDateString('ko-KR');
-    const currency = (data.ticker || '').endsWith('.KS') ? '₩' : '$';
+    const isKr = (data.ticker || '').endsWith('.KS') || (data.ticker || '').endsWith('.KQ') || data.market === 'KR';
+    const currency = isKr ? '₩' : '$';
     const name = data.companyName || data.ticker;
     const ticker = data.ticker;
     const f = data.fundamentals || {};
@@ -905,8 +906,10 @@ async function analyzeStockComparison(data1, data2, useDeep = false, tone = 'nor
     const score2 = computeScore(data2);
     const nameA = data1.companyName || data1.ticker;
     const nameB = data2.companyName || data2.ticker;
-    const cA = (data1.ticker || '').endsWith('.KS') ? '₩' : '$';
-    const cB = (data2.ticker || '').endsWith('.KS') ? '₩' : '$';
+    const isKrA = (data1.ticker || '').endsWith('.KS') || (data1.ticker || '').endsWith('.KQ') || data1.market === 'KR';
+    const isKrB = (data2.ticker || '').endsWith('.KS') || (data2.ticker || '').endsWith('.KQ') || data2.market === 'KR';
+    const cA = isKrA ? '₩' : '$';
+    const cB = isKrB ? '₩' : '$';
     const f1 = data1.fundamentals || {};
     const f2 = data2.fundamentals || {};
     const t1 = data1.technical || {};
