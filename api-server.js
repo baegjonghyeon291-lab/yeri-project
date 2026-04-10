@@ -848,32 +848,32 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
     }
 
     const USD_KRW_RATE = 1400; // 정적 환율 방어 기준
-    const isKR = (ticker) => ticker.endsWith('.KS') || ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(ticker);
-    let hasKRW = enriched.some(h => isKR(h.ticker));
+    const isKR = (h) => h.isKorean === true || h.market === 'KR' || h.ticker.endsWith('.KS') || h.ticker.endsWith('.KQ') || /^[0-9]{6}$/.test(h.ticker);
+    let hasKRW = enriched.some(h => isKR(h));
 
     const displayCurrency = hasKRW ? 'KRW' : 'USD';
-    const normalize = (amount, ticker) => {
+    const normalize = (amount, h) => {
         if (!amount) return 0;
-        if (displayCurrency === 'KRW' && !isKR(ticker)) return amount * USD_KRW_RATE;
-        if (displayCurrency === 'USD' && isKR(ticker)) return amount / USD_KRW_RATE;
+        if (displayCurrency === 'KRW' && !isKR(h)) return amount * USD_KRW_RATE;
+        if (displayCurrency === 'USD' && isKR(h)) return amount / USD_KRW_RATE;
         return amount;
     };
 
     // 각 종목에 displayCurrency 기준 표시용 값 추가
     enriched.forEach(h => {
-        h.currency = isKR(h.ticker) ? 'KRW' : 'USD';
-        h.displayAvgPrice = Math.round(normalize(h.avgPrice, h.ticker));
-        h.displayCurrentPrice = h.currentPrice != null ? Math.round(normalize(h.currentPrice, h.ticker)) : null;
-        h.displayInvested = Math.round(normalize(h.investedAmount, h.ticker));
-        h.displayValue = h.currentValue != null ? Math.round(normalize(h.currentValue, h.ticker)) : null;
-        h.displayPL = h.profitLoss != null ? Math.round(normalize(h.profitLoss, h.ticker)) : null;
+        h.currency = isKR(h) ? 'KRW' : 'USD';
+        h.displayAvgPrice = Math.round(normalize(h.avgPrice, h));
+        h.displayCurrentPrice = h.currentPrice != null ? Math.round(normalize(h.currentPrice, h)) : null;
+        h.displayInvested = Math.round(normalize(h.investedAmount, h));
+        h.displayValue = h.currentValue != null ? Math.round(normalize(h.currentValue, h)) : null;
+        h.displayPL = h.profitLoss != null ? Math.round(normalize(h.profitLoss, h)) : null;
         // 수익률은 환율 변환 불필요 (퍼센트이므로 동일)
     });
 
     const totalInvested = enriched.reduce((s, h) => s + h.displayInvested, 0);
     const totalValue = enriched.reduce((s, h) => s + (h.displayValue || h.displayInvested), 0);
     const totalPL = totalValue - totalInvested;
-    const totalAnnualDividend = enriched.reduce((s, h) => s + Math.round(normalize(((h.quantity * (h.dividend?.rate || 0)) || 0), h.ticker)), 0);
+    const totalAnnualDividend = enriched.reduce((s, h) => s + Math.round(normalize(((h.quantity * (h.dividend?.rate || 0)) || 0), h)), 0);
 
     enriched.forEach(h => {
         const normVal = h.displayValue || h.displayInvested;
@@ -992,8 +992,34 @@ app.post('/api/portfolio/:userId/add', (req, res) => {
     if (!ticker || !quantity || !avgPrice) {
         return res.status(400).json({ error: 'ticker, quantity, avgPrice are required' });
     }
+
+    const { resolveStock } = require('./utils/ticker-util');
+    const resolved = resolveStock(ticker);
+    const finalTicker = resolved?.ticker || (ticker.includes('.KS') || ticker.includes('.KQ') ? ticker : ticker.toUpperCase());
+    const finalName = resolved?.name || name || finalTicker;
+    
+    // 강제 KR 판별
+    const isKorean = finalTicker.endsWith('.KS') || finalTicker.endsWith('.KQ') || /^[0-9]{6}$/.test(finalTicker) || (resolved?.market === 'KR');
+    const market = isKorean ? 'KR' : 'US';
+    const currency = isKorean ? 'KRW' : 'USD';
+    const uiCurrency = isKorean ? '₩' : '$';
+
     const result = portfolioStore.add(req.params.userId, {
-        ticker, name: name || ticker.toUpperCase(), quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts
+        ticker: finalTicker, 
+        name: finalName,
+        market,
+        currency,
+        uiCurrency,
+        isKorean,
+        quantity, 
+        avgPrice, 
+        buyDate, 
+        memo, 
+        tradeReason, 
+        targetPrice, 
+        lossPrice, 
+        viewTerm, 
+        alerts
     });
     res.json({
         result,

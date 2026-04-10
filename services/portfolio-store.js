@@ -49,7 +49,7 @@ function get(userId) {
  * - 신규 종목이면 추가
  * @returns 'added' | 'merged' | 'limit_reached'
  */
-function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts }) {
+function add(userId, { ticker, name, market, currency, uiCurrency, isKorean, quantity, avgPrice, buyDate, memo, tradeReason, targetPrice, lossPrice, viewTerm, alerts }) {
     const { all, id } = getUserData(userId);
     const upper = (ticker || '').toUpperCase();
     const qty   = Number(quantity) || 0;
@@ -66,6 +66,10 @@ function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo, tradeRea
         existing.avgPrice = Math.round((totalCost / totalQty) * 100) / 100;
         existing.quantity = totalQty;
         if (name) existing.name = name;
+        if (market) existing.market = market;
+        if (currency) existing.currency = currency;
+        if (uiCurrency) existing.uiCurrency = uiCurrency;
+        if (isKorean !== undefined) existing.isKorean = isKorean;
         if (tradeReason !== undefined) existing.tradeReason = tradeReason;
         if (targetPrice !== undefined) existing.targetPrice = targetPrice;
         if (lossPrice !== undefined) existing.lossPrice = lossPrice;
@@ -80,6 +84,10 @@ function add(userId, { ticker, name, quantity, avgPrice, buyDate, memo, tradeRea
     all[id].holdings.push({
         ticker: upper,
         name:   name || upper,
+        market: market || 'US',
+        currency: currency || 'USD',
+        uiCurrency: uiCurrency || '$',
+        isKorean: isKorean || false,
         quantity: qty,
         avgPrice: price,
         buyDate: buyDate || null,
