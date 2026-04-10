@@ -1188,6 +1188,7 @@ function suggestCandidates(text) {
     // Levenshtein fuzzy보다 먼저 실행하여 비주류 종목 인식 보장
     // ════════════════════════════════════════════════════════
     const krDeterministic = [];
+    const seenRawCodes = new Set(); // rawCode 기준 중복 제거 (005930 vs 005930.KS)
     const seenTickers = new Set();
     const qLower = normalized.toLowerCase().replace(/\s/g, '');
 
@@ -1196,6 +1197,9 @@ function suggestCandidates(text) {
         const keyNorm = key.toLowerCase().replace(/\s/g, '');
         const nameNorm = (info.name || '').toLowerCase().replace(/\s/g, '');
         const code = info.ticker.replace(/\.(KS|KQ)$/i, '');
+
+        // rawCode 기준 중복 제거: 005930과 005930.KS 중 .KS 버전만 남김
+        if (seenRawCodes.has(code)) continue;
 
         let score = 0;
 
@@ -1210,10 +1214,14 @@ function suggestCandidates(text) {
         // 이름/키 포함 일치
         else if ((keyNorm.includes(qLower) || nameNorm.includes(qLower)) && qLower.length >= 2) score = 0.75;
 
-        if (score > 0 && !seenTickers.has(info.ticker)) {
-            seenTickers.add(info.ticker);
+        if (score > 0) {
+            // .KS/.KQ suffix가 있는 버전 우선 사용
+            const tickerWithSuffix = info.ticker.includes('.') ? info.ticker : code + '.KS';
+            const finalInfo = { ...info, ticker: tickerWithSuffix };
+            seenRawCodes.add(code);
+            seenTickers.add(tickerWithSuffix);
             krDeterministic.push({
-                key, info, market: 'KR', score
+                key, info: finalInfo, market: 'KR', score
             });
         }
     }
@@ -1254,9 +1262,17 @@ function suggestCandidates(text) {
 
     // exact match가 존재하면 리스트 맨 앞에 보장 배치
     if (exact) {
-        const exactIndex = unique.findIndex(u => u.info.ticker === exact.ticker);
-        if (exactIndex !== -1) unique.splice(exactIndex, 1);
-        unique.unshift({ key: text, info: exact, market: exact.market, score: 1.0 });
+        // KR 종목이면 .KS/.KQ suffix 보장
+        let exactTicker = exact.ticker;
+        if (exact.market === 'KR' && !exactTicker.includes('.')) {
+            exactTicker = exactTicker + '.KS';
+        }
+        const exactInfo = { ...exact, ticker: exactTicker };
+        const rawCode = exactTicker.replace(/\.(KS|KQ)$/i, '');
+        // rawCode 기준으로 이미 리스트에 있으면 제거 후 맨 앞에 삽입
+        const dupeIndex = unique.findIndex(u => u.info.ticker.replace(/\.(KS|KQ)$/i, '') === rawCode);
+        if (dupeIndex !== -1) unique.splice(dupeIndex, 1);
+        unique.unshift({ key: text, info: exactInfo, market: exactInfo.market, score: 1.0 });
     }
 
     if (!unique.length) {

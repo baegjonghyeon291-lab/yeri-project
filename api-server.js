@@ -1004,6 +1004,32 @@ app.post('/api/portfolio/:userId/add', (req, res) => {
     const currency = isKorean ? 'KRW' : 'USD';
     const uiCurrency = isKorean ? '₩' : '$';
 
+    // avgPrice 정규화: 문자열 쉼표 제거 후 숫자 변환
+    let normalizedAvgPrice = Number(String(avgPrice).replace(/,/g, ''));
+    if (isNaN(normalizedAvgPrice) || normalizedAvgPrice <= 0) {
+        return res.status(400).json({ error: '올바른 평균 단가를 입력해주세요.' });
+    }
+
+    // 국내주식 avgPrice Sanity Check: 한국 주식인데 평단이 비정상적으로 작으면 경고 로그 + 응답에 warning
+    let priceWarning = null;
+    if (isKorean && normalizedAvgPrice < 100) {
+        priceWarning = `⚠️ 국내 주식(${finalName})의 평균 단가가 ${normalizedAvgPrice}원으로 매우 낮습니다. 원화 기준 정확한 금액을 입력했는지 확인해주세요.`;
+        console.warn(`[API /portfolio/add] ${priceWarning}`);
+    }
+
+    // 상세 저장 로그
+    console.log(`[API /portfolio/add] ═══ 저장 상세 로그 ═══`);
+    console.log(`  input ticker: ${ticker}`);
+    console.log(`  resolved ticker: ${finalTicker}`);
+    console.log(`  resolved name: ${finalName}`);
+    console.log(`  market: ${market}`);
+    console.log(`  isKorean: ${isKorean}`);
+    console.log(`  avgPrice raw: ${avgPrice}`);
+    console.log(`  avgPrice normalized: ${normalizedAvgPrice}`);
+    console.log(`  quantity: ${quantity}`);
+    console.log(`  currency: ${currency} / uiCurrency: ${uiCurrency}`);
+    console.log(`  ═══════════════════════════════════`);
+
     const result = portfolioStore.add(req.params.userId, {
         ticker: finalTicker, 
         name: finalName,
@@ -1012,7 +1038,7 @@ app.post('/api/portfolio/:userId/add', (req, res) => {
         uiCurrency,
         isKorean,
         quantity, 
-        avgPrice, 
+        avgPrice: normalizedAvgPrice, 
         buyDate, 
         memo, 
         tradeReason, 
@@ -1021,11 +1047,13 @@ app.post('/api/portfolio/:userId/add', (req, res) => {
         viewTerm, 
         alerts
     });
-    res.json({
+    const response = {
         result,
         holdings: portfolioStore.get(req.params.userId),
         summary: portfolioStore.getSummary(req.params.userId)
-    });
+    };
+    if (priceWarning) response.warning = priceWarning;
+    res.json(response);
 });
 
 // POST /api/portfolio/:userId/update — 수량/평단가 수정
