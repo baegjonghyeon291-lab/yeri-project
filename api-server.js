@@ -394,36 +394,27 @@ app.post('/api/chat', async (req, res) => {
         }
 
         // 2. 단일 종목 (Ticker Engine: normalize -> exact -> alias -> fuzzy)
-        const extracted = extractCompanyName(text) || text.trim();
-        let suggestion = suggestCandidates(extracted);
+        let resolvedInfo = resolveStock(text);
         const isStockIntent = hasStockKeyword(text) || (text.length <= 15 && !text.includes('안녕') && !text.includes('고마워'));
 
         // ★★ LLM 티커 Fallback (비주류 종목 등 로컬 DB에 없을 때) ★★
-        if (suggestion.tier !== 'HIGH' && intent.type === 'stock' && intent.ticker && intent.ticker !== 'UNKNOWN') {
+        if (!resolvedInfo && intent.type === 'stock' && intent.ticker && intent.ticker !== 'UNKNOWN') {
             console.log(`[API /chat] 💡 로컬 DB 실패. LLM intent.ticker(${intent.ticker}) fallback 사용`);
-            suggestion = {
-                tier: 'HIGH',
-                resolved: {
-                    ticker: intent.ticker,
-                    name: intent.resolved_name || intent.ticker,
-                    market: intent.ticker.endsWith('.KS') || intent.ticker.endsWith('.KQ') ? 'KR' : 'US'
-                }
+            resolvedInfo = {
+                ticker: intent.ticker,
+                name: intent.resolved_name || intent.ticker,
+                market: intent.ticker.endsWith('.KS') || intent.ticker.endsWith('.KQ') ? 'KR' : 'US'
             };
         }
 
-        // HIGH: 올바른 점수(0.85 이상) 이거나 정확히 일치 -> 바로 분석 수행
-        if (suggestion.tier === 'HIGH' && suggestion.resolved) {
-            let ticker = suggestion.resolved.ticker;
-            let name = suggestion.resolved.name;
-            let market = suggestion.resolved.market;
-            let corpCode = suggestion.resolved.corpCode || null;
+        // HIGH: 올바른 결과가 resolve 됨 -> 바로 분석 수행
+        if (resolvedInfo) {
+            let ticker = resolvedInfo.ticker;
+            let name = resolvedInfo.name;
+            let market = resolvedInfo.market;
+            let corpCode = resolvedInfo.corpCode || null;
 
-            console.log(`[API /chat] ▶ resolve 결과 (HIGH): input="${text}" → ticker=${ticker}, name=${name}, market=${market}`);
-            if (market === 'KR') {
-                const krInfo = resolveKoreanTicker(ticker);
-                if (krInfo) { ticker = toFinnhubKRFormat(krInfo.ticker); name = krInfo.name; corpCode = krInfo.corpCode; }
-                else { ticker = toFinnhubKRFormat(ticker); }
-            }
+            console.log(`[API /chat] ▶ resolve 결과: input="${text}" → ticker=${ticker}, name=${name}, market=${market}`);
 
             let stockIntent = 'full_analysis';
             if (hasEarningsKeyword(text)) stockIntent = 'earnings_check';
@@ -487,7 +478,12 @@ app.post('/api/chat', async (req, res) => {
 
             const reliability = computeDataReliability(data);
             if (reliability.tier === 'NO_DATA') {
-                console.warn(`[API /chat] ❌ ${ticker} 데이터 부족 (${reliability.pct}%) — 분석 거부`);
+                console.error(`\n[Fetch Failure Log] ❌ 채팅 데이터 조회 실패`);
+                console.error(`- 원본 쿼리(text): "${text}"`);
+                console.error(`- Resolved Ticker: ${ticker} (${name}), Market: ${market}`);
+                console.error(`- Final Fetch Params: corpCode=${corpCode}`);
+                console.error(`- 신뢰도 (데이터 누락율): ${reliability.pct}%\n`);
+
                 messages.push({ type: 'text', content: `"${name || ticker}" (${ticker})의 실시간 데이터를 가져올 수 없었어요.\n잠시 후 다시 시도하거나 티커를 확인해 주세요!` });
                 return res.json({ messages });
             }
