@@ -267,6 +267,13 @@ function getHistory(userId) {
     return all[id].history || [];
 }
 
+/** 보유종목 전체 교체 (서버 재시작 후 클라이언트 백업에서 복원용) */
+function setHoldings(userId, holdings) {
+    const { all, id } = getUserData(userId);
+    all[id].holdings = Array.isArray(holdings) ? holdings : [];
+    save(all);
+}
+
 function getLimit() { return MAX_HOLDINGS; }
 
-module.exports = { get, add, update, remove, clear, getSummary, saveSnapshot, getHistory, getLimit, addTrade };
+module.exports = { get, add, update, remove, clear, getSummary, saveSnapshot, getHistory, getLimit, addTrade, setHoldings };

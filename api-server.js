@@ -905,6 +905,8 @@ async function buildPortfolioSnapshot(userId, overrideHoldings = null) {
 
     return {
         holdings: enriched,
+        // overrideHoldings가 없을 때만 원본 rawHoldings 포함 (클라이언트 백업용)
+        ...(!overrideHoldings && { rawHoldings: portfolioStore.get(userId) }),
         summary: {
             holdingCount: enriched.length,
             uiCurrency: displayCurrency === 'KRW' ? '₩' : '$',
@@ -952,6 +954,17 @@ app.get('/api/portfolio/:userId', async (req, res) => {
         console.error('[Portfolio GET]', err.message);
         res.status(500).json({ error: err.message });
     }
+});
+
+// POST /api/portfolio/:userId/restore — 클라이언트 백업에서 보유종목 복원 (서버 재시작 후 자동 호출)
+app.post('/api/portfolio/:userId/restore', (req, res) => {
+    const { holdings } = req.body;
+    if (!Array.isArray(holdings) || holdings.length === 0) {
+        return res.status(400).json({ error: 'holdings array required' });
+    }
+    portfolioStore.setHoldings(req.params.userId, holdings);
+    console.log(`[Portfolio restore] userId=${req.params.userId} count=${holdings.length}`);
+    res.json({ ok: true, count: holdings.length });
 });
 
 // ==== [신규] 환경 설정 라우트 ====
