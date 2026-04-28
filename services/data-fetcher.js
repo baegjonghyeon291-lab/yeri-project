@@ -63,7 +63,7 @@ function toCache(key, data) { cache.set(key, { ts: Date.now(), data }); }
 // ─────────────────────────────────────────────
 // Safe fetch — timeout + 에러 없이 null 반환 + 실패 로깅
 // ─────────────────────────────────────────────
-const API_TIMEOUT = 6000; // 6초 기본 타임아웃 (기존 2초 → API 응답 여유 확보)
+const API_TIMEOUT = 12000; // 12초 기본 타임아웃 (Render 서버 웜업 시 Yahoo 응답 여유 확보)
 
 function withTimeout(promise, ms = API_TIMEOUT) {
     return Promise.race([
