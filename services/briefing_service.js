@@ -322,7 +322,7 @@ ${newsBlock}
                 },
                 { role: 'user', content: prompt }
             ],
-            max_tokens: 1400,
+            max_tokens: 2500,
         });
         return response.choices[0].message.content;
     } catch (err) {

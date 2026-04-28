@@ -41,13 +41,13 @@ const THRESHOLDS = {
 function detectSignal(data, style = '스윙') {
     const thr = THRESHOLDS[style] || THRESHOLDS['스윙'];
 
-    // 지표 추출 (data 구조에 맞게 안전하게 접근)
+    // 지표 추출 — fetchAllStockData 반환 구조: data.technical.rsi
     const price   = data?.price?.current || data?.currentPrice || null;
-    const rsi     = data?.technicals?.rsi14 ?? data?.rsi ?? null;
-    const change1m = data?.price?.change1m ?? data?.change1m ?? null; // %
-    const change1d = data?.price?.changePercent ?? data?.changePercent ?? null;
-    const ema20   = data?.technicals?.ema20 ?? null;
-    const macdSignal = data?.technicals?.macdSignal ?? null; // 'golden'|'dead'|null
+    const rsi     = data?.technical?.rsi ?? data?.technicals?.rsi14 ?? data?.rsi ?? null;
+    const change1m = data?.price?.change1m ?? data?.change1m ?? null;
+    const change1d = data?.price?.changePct ?? data?.price?.changePercent ?? data?.changePercent ?? null;
+    const ema20   = data?.technical?.ema20 ?? data?.technicals?.ema20 ?? null;
+    const macdSignal = data?.technical?.macd?.signal ?? data?.technicals?.macdSignal ?? null;
 
     const reasons = [];
     let signalType = null;

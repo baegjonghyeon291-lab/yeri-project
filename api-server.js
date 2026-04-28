@@ -1328,15 +1328,23 @@ app.get('/api/dashboard/:userId', async (req, res) => {
         ]);
 
         let marketStatus = '보통 (중립)';
-        if (marketData && marketData.market_sentiment && marketData.market_sentiment.fear_greed_index != null) {
-            const fg = marketData.market_sentiment.fear_greed_index.value;
-            if (fg > 65) marketStatus = '강세 (탐욕)';
-            else if (fg < 35) marketStatus = '약세 (공포)';
+        const fgScore = marketData?.fearGreed?.score ?? null;
+        if (fgScore != null) {
+            if (fgScore >= 76) marketStatus = '강세 (극도의 탐욕)';
+            else if (fgScore >= 56) marketStatus = '강세 (탐욕)';
+            else if (fgScore >= 46) marketStatus = '보통 (중립)';
+            else if (fgScore >= 26) marketStatus = '약세 (공포)';
+            else marketStatus = '약세 (극도의 공포)';
         }
 
         res.json({
             ok: true,
-            market: { status: marketStatus },
+            market: {
+                status: marketStatus,
+                fearGreed: marketData?.fearGreed ?? null,
+                vix: marketData?.macro?.vix ?? null,
+                usdKrw: marketData?.macro?.usdKrw ?? null,
+            },
             portfolio: snap ? {
                 healthLabel: snap.healthScore.label,
                 riskTop: (snap.portfolioStatus.riskTop3 || []).map(r => r.ticker).join(', '),
@@ -1353,14 +1361,14 @@ app.get('/api/dashboard/:userId', async (req, res) => {
 // GET /api/alerts/:userId          — 관심종목 알림/상태 조회 (5분 캐시)
 // GET /api/alerts/:userId?refresh=true — 캐시 무시하고 즉시 재스캔
 app.get('/api/alerts/:userId', async (req, res) => {
-    const { chatId } = req.params;
+    const { userId } = req.params;
     const forceRefresh = req.query.refresh === 'true';
     try {
-        if (forceRefresh) invalidateCache(chatId);
-        const result = await scanWatchlist(chatId);
+        if (forceRefresh) invalidateCache(userId);
+        const result = await scanWatchlist(userId);
         res.json({
             ok: true,
-            chatId,
+            userId,
             alertCount: result.alertCount || 0,
             alerts: result.alerts || [],
             stocks: result.stocks || [],
@@ -1374,9 +1382,9 @@ app.get('/api/alerts/:userId', async (req, res) => {
 
 // GET /api/alerts/:userId/summary — 알림 배지 숫자만 빠르게 반환
 app.get('/api/alerts/:userId/summary', async (req, res) => {
-    const { chatId } = req.params;
+    const { userId } = req.params;
     try {
-        const result = await scanWatchlist(chatId);
+        const result = await scanWatchlist(userId);
         res.json({
             ok: true,
             alertCount: result.alertCount || 0,
@@ -1396,18 +1404,19 @@ app.get('/api/alerts/:userId/summary', async (req, res) => {
 app.get('/api/hot-stocks', async (req, res) => {
     try {
         const topTickers = ['NVDA', 'TSLA', 'AAPL', 'MSTR', 'PLTR'];
-        const results = [];
-        
-        for (const t of topTickers) {
-            // 캐싱된 fetchAllStockData 호출 (매우 빠름)
-            const data = await fetchAllStockData(t);
-            results.push({
-                ticker: data.ticker,
-                name: data.companyName,
-                price: data.price?.current || null,
-                changePct: data.price?.changePct || null
-            });
-        }
+        const settled = await Promise.allSettled(topTickers.map(t => fetchAllStockData(t)));
+        const results = settled
+            .map((r, i) => {
+                if (r.status !== 'fulfilled') return null;
+                const data = r.value;
+                return {
+                    ticker: data.ticker,
+                    name: data.companyName,
+                    price: data.price?.current || null,
+                    changePct: data.price?.changePct ?? data.price?.changePercent ?? null
+                };
+            })
+            .filter(Boolean);
         res.json({ ok: true, data: results });
     } catch (error) {
         console.error('[API /hot-stocks] Error:', error);
