@@ -45,12 +45,18 @@ function extractStockSummary(data) {
         ? newsItems.map(n => `  • [${n.publishedAt || '날짜 없음'}] ${n.title} (${n.source || '출처 없음'})`).join('\n')
         : '  최신 뉴스 부족';
 
+    // 실적 발표일
+    const nextEarnings = data.fundamentals?.nextEarningsDate
+        ? String(data.fundamentals.nextEarningsDate).slice(0, 10)
+        : null;
+
     return {
         ticker, name, currency,
         price, changePct, hi52w, lo52w, volume,
         rsi, rsiSig, ema20, ema50, macdTrend, macdHist,
         support, resistance,
         newsBlock,
+        nextEarnings,
         hasData: data.price?.current != null,
         hasNews: newsItems.length > 0,
     };
@@ -69,7 +75,7 @@ function buildStockBlock(s) {
     return `
 [${s.name} (${s.ticker})]
 현재가: ${s.price} | 전일비: ${s.changePct} | 거래량: ${s.volume}
-52주 고점: ${s.hi52w} | 52주 저점: ${s.lo52w}
+52주 고점: ${s.hi52w} | 52주 저점: ${s.lo52w}${s.nextEarnings ? `\n다음 실적 발표: ${s.nextEarnings}` : ''}
 RSI(14): ${s.rsi} ${s.rsiSig ? `→ ${s.rsiSig}` : ''}
 EMA20: ${s.ema20} | EMA50: ${s.ema50}
 MACD 추세: ${s.macdTrend}${s.macdHist ? ` (Hist: ${s.macdHist})` : ''}
@@ -219,7 +225,7 @@ async function generateMarketBriefing() {
         return '시장 데이터 수집에 실패했어요. 잠시 후 다시 시도해주세요.';
     }
 
-    const { indices, macro, news } = marketData;
+    const { indices, macro, news, fearGreed, sectorETFs, crypto } = marketData;
 
     // 데이터 충분히 수집되었는지 확인 (최소 S&P 500과 VIX 여부)
     const validDataCount = (indices?.['S&P 500'] ? 1 : 0) + (indices?.['NASDAQ'] ? 1 : 0) + (macro?.vix ? 1 : 0) + (macro?.tenYearYield ? 1 : 0);
@@ -233,13 +239,36 @@ async function generateMarketBriefing() {
           ).join('\n')
         : '  지수 데이터 부족';
 
+    const spreadStr = macro?.yieldSpread != null
+        ? `${macro.yieldSpread}%p (${parseFloat(macro.yieldSpread) < 0 ? '⚠️ 장단기 역전' : '정상'})`
+        : '데이터 부족';
+
     const macroBlock = macro ? [
         `  기준금리: ${macro.federalFundsRate ?? '데이터 부족'}%`,
         `  CPI: ${macro.cpi ?? '데이터 부족'}`,
         `  실업률: ${macro.unemployment ?? '데이터 부족'}%`,
-        `  10Y채권: ${macro.tenYearYield ?? '데이터 부족'}%`,
+        `  2Y채권: ${macro.twoYearYield ?? '데이터 부족'}% | 10Y채권: ${macro.tenYearYield ?? '데이터 부족'}% | 장단기 스프레드: ${spreadStr}`,
         `  VIX: ${macro.vix ?? '데이터 부족'}`,
-    ].join('\n') : '  거시경제 데이터 부족';
+        macro.usdKrw ? `  USD/KRW: ${macro.usdKrw.toLocaleString()}원` : null,
+    ].filter(Boolean).join('\n') : '  거시경제 데이터 부족';
+
+    const fearGreedBlock = fearGreed
+        ? `  Fear & Greed: ${fearGreed.score}/100 — ${fearGreed.ratingKr} (1주전: ${fearGreed.prev1Week}, 1달전: ${fearGreed.prev1Month})`
+        : '  Fear & Greed: 데이터 부족';
+
+    const sectorBlock = sectorETFs?.length
+        ? sectorETFs
+            .sort((a, b) => b.changePct - a.changePct)
+            .map(s => `  ${s.name}(${s.ticker}): ${s.changePct >= 0 ? '+' : ''}${s.changePct}%`)
+            .join('\n')
+        : '  섹터 데이터 부족';
+
+    const cryptoBlock = crypto
+        ? [
+            `  BTC: $${(crypto.bitcoin?.price ?? 0).toLocaleString()} (${crypto.bitcoin?.changePct >= 0 ? '+' : ''}${crypto.bitcoin?.changePct ?? '?'}%)`,
+            crypto.ethereum ? `  ETH: $${(crypto.ethereum.price ?? 0).toLocaleString()} (${crypto.ethereum.changePct >= 0 ? '+' : ''}${crypto.ethereum.changePct ?? '?'}%)` : null,
+          ].filter(Boolean).join('\n')
+        : '  암호화폐 데이터 부족';
 
     const newsItems = (news || []).slice(0, 4);
     const newsBlock = newsItems.length > 0
@@ -254,17 +283,28 @@ ${indexBlock}
 [거시경제]
 ${macroBlock}
 
+[시장 심리 — CNN Fear & Greed]
+${fearGreedBlock}
+
+[섹터별 등락 (ETF 기준, 오늘)]
+${sectorBlock}
+
+[암호화폐]
+${cryptoBlock}
+
 [시장 뉴스 (최신 ${newsItems.length}건)]
 ${newsBlock}
 
 위 실데이터를 기반으로 오늘 시장 브리핑을 아래 형식으로 작성해줘.
 
 📌 결론: 오늘 시장 한줄 요약
-💹 가격/기술: 주요 지수 흐름 + VIX 기준 변동성 (실수치 반드시 포함)
+💹 지수/금리: 주요 지수 흐름 + VIX 변동성 + 장단기 금리 스프레드 (역전 여부 명시)
+😨 시장 심리: Fear & Greed 점수 해석 + 최근 변화 방향 (1주전 대비)
+📊 섹터: 강세/약세 섹터 각 1~2개 + 해석 1줄
+₿ 암호화폐: BTC/ETH 흐름 + 주식 시장과의 연관성 1줄
 📰 뉴스: 시장 뉴스 방향성 요약 (뉴스 없으면 "최신 뉴스 부족")
 ✅ 긍정 포인트: 2가지
 ⚠️ 부정 포인트: 2가지
-🧠 시장 심리: 한 줄
 👉 전략 제안: 오늘 투자자별 행동 방향 (단타/스윙/장기 각 1줄)
 
 [절대 금지]

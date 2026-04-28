@@ -692,7 +692,7 @@ async function getMacroData() {
         ['FRED', async () => {
             const key = process.env.FRED_API_KEY?.trim();
             if (!key) return null;
-            const seriesIds = ['FEDFUNDS', 'CPIAUCSL', 'UNRATE', 'DGS10', 'VIXCLS', 'T10YIE'];
+            const seriesIds = ['FEDFUNDS', 'CPIAUCSL', 'UNRATE', 'DGS10', 'VIXCLS', 'T10YIE', 'DGS2'];
             const results = await Promise.allSettled(seriesIds.map(s =>
                 axios.get('https://api.stlouisfed.org/fred/series/observations', {
                     params: { series_id: s, api_key: key, file_type: 'json', sort_order: 'desc', limit: 1 },
@@ -700,37 +700,181 @@ async function getMacroData() {
                 })
             ));
             const extract = (r) => r.status === 'fulfilled' ? r.value.data?.observations?.[0]?.value : null;
+            const tenY = parseFloat(extract(results[3]));
+            const twoY = parseFloat(extract(results[6]));
             return {
                 federalFundsRate: extract(results[0]),
                 cpi: extract(results[1]),
                 unemployment: extract(results[2]),
                 tenYearYield: extract(results[3]),
+                twoYearYield: extract(results[6]),
+                yieldSpread: (!isNaN(tenY) && !isNaN(twoY)) ? (tenY - twoY).toFixed(2) : null,
                 vix: extract(results[4]),
                 breakEvenInflation: extract(results[5]),
                 dataDate: new Date().toISOString().slice(0, 10),
                 source: 'FRED'
             };
         }],
-        // FRED 실패 시 Yahoo (VIX, 10Y채권 금리만이라도 확보)
+        // FRED 실패 시 Yahoo (VIX, 10Y/2Y채권 금리만이라도 확보)
         ['YahooFallback', async () => {
-            const [vix, tnx] = await Promise.allSettled([
+            const [vix, tnx, tyx] = await Promise.allSettled([
                 yahoo.getYahooPrice('^VIX'),
-                yahoo.getYahooPrice('^TNX')
+                yahoo.getYahooPrice('^TNX'),
+                yahoo.getYahooPrice('^IRX')
             ]);
-            
+
             const vixVal = vix.status === 'fulfilled' ? vix.value?.current : null;
             const tnxVal = tnx.status === 'fulfilled' ? tnx.value?.current : null;
-            
+            const irxVal = tyx.status === 'fulfilled' ? tyx.value?.current : null;
+
             if (!vixVal && !tnxVal) return null;
-            
+
+            const tenY = parseFloat(tnxVal);
+            const twoY = irxVal ? parseFloat(irxVal) / 10 : null;
             return {
                 federalFundsRate: null,
                 cpi: null,
                 unemployment: null,
                 tenYearYield: tnxVal,
+                twoYearYield: twoY?.toFixed(2) ?? null,
+                yieldSpread: (!isNaN(tenY) && twoY != null) ? (tenY - twoY).toFixed(2) : null,
                 vix: vixVal,
                 breakEvenInflation: null,
                 dataDate: new Date().toISOString().slice(0, 10),
+                source: 'Yahoo'
+            };
+        }]
+    ]);
+
+    if (data) toCache(cacheKey, data);
+
+    // KRW 환율 보강 (Yahoo, 별도 캐시)
+    if (data) {
+        const krwCached = fromCache('krw_rate');
+        if (krwCached) {
+            data.usdKrw = krwCached;
+        } else {
+            const krw = await safeGet('KRW/Yahoo', () => yahoo.getYahooPrice('KRW=X'), 5000);
+            if (krw?.current) {
+                data.usdKrw = Math.round(krw.current);
+                toCache('krw_rate', data.usdKrw);
+            }
+        }
+    }
+
+    return data;
+}
+
+// ═══════════════════════════════════════════════════════
+// ⑨-b FEAR & GREED INDEX — CNN
+// ═══════════════════════════════════════════════════════
+async function getFearAndGreedIndex() {
+    const cacheKey = 'fear_greed';
+    const cached = fromCache(cacheKey);
+    if (cached) return cached;
+
+    const data = await safeGet('FearGreed/CNN', async () => {
+        const res = await axios.get(
+            'https://production.dataviz.cnn.io/index/fearandgreed/graphdata',
+            { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DataBot/1.0)' } }
+        );
+        const fg = res.data?.fear_and_greed;
+        if (!fg?.score) return null;
+        const score = Math.round(fg.score);
+        let ratingKr = '중립';
+        if (score >= 76) ratingKr = '극도의 탐욕';
+        else if (score >= 56) ratingKr = '탐욕';
+        else if (score >= 46) ratingKr = '중립';
+        else if (score >= 26) ratingKr = '공포';
+        else ratingKr = '극도의 공포';
+        return {
+            score,
+            rating: fg.rating || ratingKr,
+            ratingKr,
+            prevClose: Math.round(fg.previous_close ?? score),
+            prev1Week: Math.round(fg.previous_1_week ?? score),
+            prev1Month: Math.round(fg.previous_1_month ?? score),
+            source: 'CNN'
+        };
+    }, 8000);
+
+    if (data) toCache(cacheKey, data);
+    return data;
+}
+
+// ═══════════════════════════════════════════════════════
+// ⑨-c SECTOR ETF RETURNS — Yahoo Finance
+// ═══════════════════════════════════════════════════════
+async function getSectorETFReturns() {
+    const cacheKey = 'sector_etfs';
+    const cached = fromCache(cacheKey);
+    if (cached) return cached;
+
+    const sectors = [
+        { name: '기술', ticker: 'XLK' },
+        { name: '금융', ticker: 'XLF' },
+        { name: '에너지', ticker: 'XLE' },
+        { name: '헬스케어', ticker: 'XLV' },
+        { name: '필수소비재', ticker: 'XLP' },
+        { name: '임의소비재', ticker: 'XLY' },
+        { name: '산업재', ticker: 'XLI' },
+        { name: '유틸리티', ticker: 'XLU' },
+        { name: '커뮤니케이션', ticker: 'XLC' },
+    ];
+
+    const results = await Promise.allSettled(
+        sectors.map(s => safeGet(`SectorETF/${s.ticker}`, () => yahoo.getYahooPrice(s.ticker), 6000))
+    );
+
+    const data = sectors.map((s, i) => {
+        const r = results[i];
+        if (r.status === 'fulfilled' && r.value?.changePercent != null) {
+            return { name: s.name, ticker: s.ticker, changePct: parseFloat(r.value.changePercent.toFixed(2)) };
+        }
+        if (r.status === 'fulfilled' && r.value?.changePct != null) {
+            return { name: s.name, ticker: s.ticker, changePct: parseFloat(r.value.changePct.toFixed(2)) };
+        }
+        return null;
+    }).filter(Boolean);
+
+    if (data.length > 0) toCache(cacheKey, data);
+    return data.length > 0 ? data : null;
+}
+
+// ═══════════════════════════════════════════════════════
+// ⑨-d CRYPTO PRICES — CoinGecko → Yahoo
+// ═══════════════════════════════════════════════════════
+async function getCryptoPrices() {
+    const cacheKey = 'crypto';
+    const cached = fromCache(cacheKey);
+    if (cached) return cached;
+
+    const data = await withFallback('Crypto', [
+        ['CoinGecko', async () => {
+            const res = await axios.get(
+                'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true',
+                { timeout: 8000 }
+            );
+            const btc = res.data?.bitcoin;
+            const eth = res.data?.ethereum;
+            if (!btc?.usd) return null;
+            return {
+                bitcoin: { price: Math.round(btc.usd), changePct: btc.usd_24h_change?.toFixed(2) },
+                ethereum: eth?.usd ? { price: Math.round(eth.usd), changePct: eth.usd_24h_change?.toFixed(2) } : null,
+                source: 'CoinGecko'
+            };
+        }],
+        ['Yahoo', async () => {
+            const [btc, eth] = await Promise.allSettled([
+                yahoo.getYahooPrice('BTC-USD'),
+                yahoo.getYahooPrice('ETH-USD')
+            ]);
+            const btcVal = btc.status === 'fulfilled' ? btc.value : null;
+            if (!btcVal?.current) return null;
+            const ethVal = eth.status === 'fulfilled' ? eth.value : null;
+            return {
+                bitcoin: { price: Math.round(btcVal.current), changePct: (btcVal.changePercent ?? btcVal.changePct)?.toFixed(2) },
+                ethereum: ethVal?.current ? { price: Math.round(ethVal.current), changePct: (ethVal.changePercent ?? ethVal.changePct)?.toFixed(2) } : null,
                 source: 'Yahoo'
             };
         }]
@@ -986,12 +1130,15 @@ async function fetchAllStockData(ticker, companyName = null, corpCode = null) {
 }
 
 async function fetchMarketData() {
-    const [indices, macro, news] = await Promise.all([
+    const [indices, macro, news, fearGreed, sectorETFs, crypto] = await Promise.all([
         getMarketIndices(),
         getMacroData(),
-        getNews('stock market economy inflation federal reserve interest rates')
+        getNews('stock market economy inflation federal reserve interest rates'),
+        getFearAndGreedIndex(),
+        getSectorETFReturns(),
+        getCryptoPrices()
     ]);
-    return { indices, macro, news };
+    return { indices, macro, news, fearGreed, sectorETFs, crypto };
 }
 
 async function fetchSectorData(sectorInfo) {
@@ -1287,4 +1434,4 @@ async function fetchDeepMetric(ticker, metricClass) {
     return { status: 'NO_DATA' };
 }
 
-module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData, getApiStats, computeDataReliability, fetchDeepMetric, getAuditSnapshot, resetAuditCollector };
+module.exports = { fetchAllStockData, fetchMarketData, fetchSectorData, getMacroData, getFearAndGreedIndex, getSectorETFReturns, getCryptoPrices, getApiStats, computeDataReliability, fetchDeepMetric, getAuditSnapshot, resetAuditCollector };
