@@ -41,13 +41,14 @@ const THRESHOLDS = {
 function detectSignal(data, style = '스윙') {
     const thr = THRESHOLDS[style] || THRESHOLDS['스윙'];
 
-    // 지표 추출 — fetchAllStockData 반환 구조: data.technical.rsi
-    const price   = data?.price?.current || data?.currentPrice || null;
-    const rsi     = data?.technical?.rsi ?? data?.technicals?.rsi14 ?? data?.rsi ?? null;
-    const change1m = data?.price?.change1m ?? data?.change1m ?? null;
+    // 지표 추출 — fetchAllStockData 반환 구조
+    const price    = data?.price?.current || data?.currentPrice || null;
+    const rsi      = data?.technical?.rsi ?? data?.technicals?.rsi14 ?? data?.rsi ?? null;
+    const change1m = parseFloat(data?.history?.change1M ?? data?.price?.change1m ?? data?.change1m ?? 0) || null;
     const change1d = data?.price?.changePct ?? data?.price?.changePercent ?? data?.changePercent ?? null;
-    const ema20   = data?.technical?.ema20 ?? data?.technicals?.ema20 ?? null;
-    const macdSignal = data?.technical?.macd?.signal ?? data?.technicals?.macdSignal ?? null;
+    const ema20    = data?.technical?.ema20 ?? data?.technicals?.ema20 ?? null;
+    const macdHist = parseFloat(data?.technical?.macd?.hist ?? 0);
+    const macdBullish = !isNaN(macdHist) && macdHist > 0; // hist > 0 = MACD above signal line
 
     const reasons = [];
     let signalType = null;
@@ -79,7 +80,7 @@ function detectSignal(data, style = '스윙') {
         signalType = 'BUY';
         if (rsi !== null && rsi <= thr.buyRsi) reasons.push(`RSI ${rsi.toFixed(1)} (과매도 <${thr.buyRsi})`);
         if (change1m !== null && change1m <= -thr.buyDrop) reasons.push(`1개월 -${Math.abs(change1m).toFixed(1)}% 낙폭 과대`);
-        if (macdSignal === 'golden') reasons.push('MACD 골든크로스 진입 중');
+        if (macdBullish) reasons.push('MACD 히스토그램 양전환 (상승 모멘텀)');
     }
 
     if (!signalType) return null;

@@ -910,7 +910,7 @@ async function getMarketIndices() {
         { provider: 'Yahoo', symbols: { 'S&P 500': '^GSPC', 'NASDAQ': '^IXIC', 'DOW': '^DJI' }, fn: async (sym) => {
             const data = await yahoo.getYahooPrice(sym);
             if (!data) return null;
-            return { current: data.current, changePct: data.changePercent };
+            return { current: data.current, changePct: data.changePct };
         }}
     ];
 
