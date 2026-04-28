@@ -90,6 +90,13 @@ function getAllUsers() {
         }));
 }
 
+/** 관심종목 전체 교체 (서버 재시작 후 클라이언트 백업에서 복원용) */
+function setList(chatId, tickers) {
+    const { all, id } = getChatData(chatId);
+    all[id].tickers = Array.isArray(tickers) ? tickers.map(t => String(t).toUpperCase()).slice(0, MAX_WATCHLIST) : [];
+    save(all);
+}
+
 function getLimit() { return MAX_WATCHLIST; }
 
-module.exports = { get, add, remove, setStyle, getStyle, getAllUsers, getLimit };
+module.exports = { get, add, remove, setStyle, getStyle, getAllUsers, getLimit, setList };

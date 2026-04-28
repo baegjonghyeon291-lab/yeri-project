@@ -762,6 +762,17 @@ app.post('/api/watchlist/:userId/style', (req, res) => {
     res.json({ ok: true });
 });
 
+// POST /api/watchlist/:userId/restore — 클라이언트 백업에서 관심종목 복원 (서버 재시작 후 자동 호출)
+app.post('/api/watchlist/:userId/restore', (req, res) => {
+    const { tickers } = req.body;
+    if (!Array.isArray(tickers) || tickers.length === 0) {
+        return res.status(400).json({ error: 'tickers array required' });
+    }
+    watchlistStore.setList(req.params.userId, tickers);
+    console.log(`[Watchlist restore] userId=${req.params.userId} count=${tickers.length}`);
+    res.json({ ok: true, list: watchlistStore.get(req.params.userId) });
+});
+
 // ── 시장 브리핑 (단독) ────────────────────────────────────────────
 app.get('/api/briefing/market', async (req, res) => {
     try {
