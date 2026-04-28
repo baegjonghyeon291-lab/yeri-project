@@ -123,7 +123,7 @@ function computeBonusScore(data) {
     const cur = price?.current;
     const ema20 = technical?.ema20;
     const vol = price?.volume;
-    const avgVol = price?.avgVolume;
+    const avgVol = technical?.avgVolume;
     if (cur != null && ema20 != null && cur > ema20) {
         if (vol && avgVol && vol > avgVol * 1.2) {
             total += 3; detail.push('강한상승추세(거래량수반) +3점');
