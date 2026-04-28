@@ -61,9 +61,9 @@ function staleCache(key) {
 function toCache(key, data) { cache.set(key, { ts: Date.now(), data }); }
 
 // ─────────────────────────────────────────────
-// Safe fetch — 2초 timeout + 에러 없이 null 반환 + 실패 로깅
+// Safe fetch — timeout + 에러 없이 null 반환 + 실패 로깅
 // ─────────────────────────────────────────────
-const API_TIMEOUT = 2000; // 2초 글로벌 타임아웃
+const API_TIMEOUT = 6000; // 6초 기본 타임아웃 (기존 2초 → API 응답 여유 확보)
 
 function withTimeout(promise, ms = API_TIMEOUT) {
     return Promise.race([
@@ -72,10 +72,10 @@ function withTimeout(promise, ms = API_TIMEOUT) {
     ]);
 }
 
-async function safeGet(label, fn) {
+async function safeGet(label, fn, timeoutMs = API_TIMEOUT) {
     const t0 = Date.now();
     try {
-        const r = await withTimeout(fn(), API_TIMEOUT);
+        const r = await withTimeout(fn(), timeoutMs);
         const elapsed = Date.now() - t0;
         const ok = r !== null && r !== undefined && r !== false;
         recordStat(label, ok, elapsed);
@@ -89,7 +89,7 @@ async function safeGet(label, fn) {
     } catch (e) {
         const elapsed = Date.now() - t0;
         recordStat(label, false, elapsed);
-        const reason = e.message === 'TIMEOUT' ? 'TIMEOUT 2s' : e.message?.slice(0, 60);
+        const reason = e.message === 'TIMEOUT' ? `TIMEOUT ${timeoutMs/1000}s` : e.message?.slice(0, 60);
         console.log(`[${label}] ❌ fail (${reason}, ${elapsed}ms)`);
         return null;
     }
@@ -325,18 +325,21 @@ async function getTechnicalIndicators(ticker) {
     const cached = fromCache(cacheKey);
     if (cached) return cached;
 
-    // Primary: TwelveData (all in one)
+    // 0순위: Yahoo Finance 로컬 계산 (무료·무제한, rate limit 없음) — 먼저 시작해서 병렬 대기
+    const yahooPromise = safeGet('Tech/Yahoo', () => yahoo.getYahooTechnicals(ticker), 10000);
+
+    // 1순위: TwelveData (7개 병렬 호출 → 12초 타임아웃 부여)
     const td = await safeGet('Tech/TwelveData', async () => {
         const key = process.env.TWELVEDATA_API_KEY;
         if (!key) return null;
         const [rsiR, macdR, ema20R, ema50R, sma200R, volR, stochR] = await Promise.allSettled([
-            axios.get(`https://api.twelvedata.com/rsi?symbol=${ticker}&interval=1day&time_period=14&apikey=${key}`, { timeout: 8000 }),
-            axios.get(`https://api.twelvedata.com/macd?symbol=${ticker}&interval=1day&apikey=${key}`, { timeout: 8000 }),
-            axios.get(`https://api.twelvedata.com/ema?symbol=${ticker}&interval=1day&time_period=20&apikey=${key}`, { timeout: 8000 }),
-            axios.get(`https://api.twelvedata.com/ema?symbol=${ticker}&interval=1day&time_period=50&apikey=${key}`, { timeout: 8000 }),
-            axios.get(`https://api.twelvedata.com/sma?symbol=${ticker}&interval=1day&time_period=200&apikey=${key}`, { timeout: 8000 }),
-            axios.get(`https://api.twelvedata.com/volume?symbol=${ticker}&interval=1day&outputsize=5&apikey=${key}`, { timeout: 8000 }),
-            axios.get(`https://api.twelvedata.com/stoch?symbol=${ticker}&interval=1day&apikey=${key}`, { timeout: 8000 })
+            axios.get(`https://api.twelvedata.com/rsi?symbol=${ticker}&interval=1day&time_period=14&apikey=${key}`, { timeout: 10000 }),
+            axios.get(`https://api.twelvedata.com/macd?symbol=${ticker}&interval=1day&apikey=${key}`, { timeout: 10000 }),
+            axios.get(`https://api.twelvedata.com/ema?symbol=${ticker}&interval=1day&time_period=20&apikey=${key}`, { timeout: 10000 }),
+            axios.get(`https://api.twelvedata.com/ema?symbol=${ticker}&interval=1day&time_period=50&apikey=${key}`, { timeout: 10000 }),
+            axios.get(`https://api.twelvedata.com/sma?symbol=${ticker}&interval=1day&time_period=200&apikey=${key}`, { timeout: 10000 }),
+            axios.get(`https://api.twelvedata.com/volume?symbol=${ticker}&interval=1day&outputsize=5&apikey=${key}`, { timeout: 10000 }),
+            axios.get(`https://api.twelvedata.com/stoch?symbol=${ticker}&interval=1day&apikey=${key}`, { timeout: 10000 })
         ]);
         const val = (r, path) => { try { return r.status === 'fulfilled' ? r.value.data?.values?.[0]?.[path] : null; } catch { return null; } };
         const rsiNum = val(rsiR, 'rsi') ? parseFloat(val(rsiR, 'rsi')) : null;
@@ -344,7 +347,7 @@ async function getTechnicalIndicators(ticker) {
         const vols = volR.status === 'fulfilled' ? volR.value.data?.values?.map(v => parseInt(v.volume)).filter(Boolean) : null;
         const stochV = stochR.status === 'fulfilled' ? stochR.value.data?.values?.[0] : null;
 
-        if (!rsiNum && !macdV && !val(ema20R, 'ema')) return null; // API 호출이 완전히 막힌 경우 (Rate Limit 등) -> 다음 Fallback으로 넘기기
+        if (!rsiNum && !macdV && !val(ema20R, 'ema')) return null;
 
         return {
             rsi: rsiNum,
@@ -362,10 +365,14 @@ async function getTechnicalIndicators(ticker) {
             stoch: stochV ? { k: parseFloat(stochV.slow_k).toFixed(2), d: parseFloat(stochV.slow_d).toFixed(2) } : null,
             source: 'TwelveData'
         };
-    });
+    }, 12000);
     if (td) { toCache(cacheKey, td); return td; }
 
-    // Fallback: AlphaVantage (RSI only)
+    // 2순위: Yahoo Finance 로컬 계산 결과 대기 (이미 병렬로 시작함)
+    const yh = await yahooPromise;
+    if (yh) { toCache(cacheKey, yh); return yh; }
+
+    // 3순위: AlphaVantage (RSI only, 25 calls/day 아끼기 위해 마지막)
     const av = await safeGet('Tech/AlphaVantage', async () => {
         const key = process.env.ALPHAVANTAGE_API_KEY;
         if (!key) return null;
@@ -378,20 +385,16 @@ async function getTechnicalIndicators(ticker) {
         const latest = Object.values(d)[0];
         const rsiNum = parseFloat(latest?.RSI);
         if (!rsiNum || isNaN(rsiNum)) return null;
-        
         return {
             rsi: rsiNum,
             rsiSignal: rsiNum < 30 ? '과매도' : rsiNum > 70 ? '과매수' : '중립',
             macd: null, ema20: null, ema50: null, sma200: null, avgVolume: null, stoch: null,
             source: 'AlphaVantage'
         };
-    });
+    }, 12000);
     if (av) { toCache(cacheKey, av); return av; }
 
-    // Final Fallback: Yahoo Finance (로컬 계산)
-    const yh = await safeGet('Tech/Yahoo', () => yahoo.getYahooTechnicals(ticker));
-    if (yh) toCache(cacheKey, yh);
-    return yh;
+    return null;
 }
 
 // ═══════════════════════════════════════════════════════

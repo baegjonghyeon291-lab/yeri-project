@@ -159,6 +159,11 @@ app.get('/api/health', (req, res) => {
     res.json({ ok: true, status: 'running', time: new Date().toISOString() });
 });
 
+// ── Keep-alive ping (Render 슬립 방지용 — 프론트에서 앱 열 때 호출) ──
+app.get('/api/ping', (req, res) => {
+    res.json({ pong: true, time: new Date().toISOString() });
+});
+
 // ── 관리용 API (세션 조회 + 데이터 수정) ──────────────────────────
 app.get('/api/admin/sessions', (req, res) => {
     try {

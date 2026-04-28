@@ -92,19 +92,26 @@ async function generateDailyBriefingText(tickers, isManual = false) {
 
     console.log(`[BriefingService] 브리핑 생성 중 (${tickers.length}개): ${tickers.join(', ')}`);
 
-    // 순차 데이터 수집 — 무료 API 속도제한(Rate Limit) 방지
-    const rawResults = [];
-    for (const ticker of tickers) {
-        try {
-            const data = await fetchAllStockData(ticker);
-            rawResults.push(extractStockSummary(data));
-        } catch (err) {
-            console.error(`[BriefingService] ${ticker} 실패:`, err.message);
-            rawResults.push({ ticker, name: ticker, hasData: false, newsBlock: '  최신 뉴스 부족' });
-        }
-        // 다음 종목 요청 전 300ms 대기 — API Rate Limit 여유 확보
-        if (tickers.indexOf(ticker) < tickers.length - 1) {
-            await new Promise(r => setTimeout(r, 300));
+    // 병렬 데이터 수집 (최대 3개 동시) — 속도 개선 + Rate Limit 균형
+    const CONCURRENCY = 3;
+    const rawResults = new Array(tickers.length);
+    for (let i = 0; i < tickers.length; i += CONCURRENCY) {
+        const batch = tickers.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.allSettled(
+            batch.map(ticker => fetchAllStockData(ticker))
+        );
+        batchResults.forEach((result, j) => {
+            const ticker = batch[j];
+            if (result.status === 'fulfilled') {
+                rawResults[i + j] = extractStockSummary(result.value);
+            } else {
+                console.error(`[BriefingService] ${ticker} 실패:`, result.reason?.message);
+                rawResults[i + j] = { ticker, name: ticker, hasData: false, newsBlock: '  최신 뉴스 부족' };
+            }
+        });
+        // 배치 사이 500ms 대기 (rate limit 여유)
+        if (i + CONCURRENCY < tickers.length) {
+            await new Promise(r => setTimeout(r, 500));
         }
     }
 
