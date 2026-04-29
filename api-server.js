@@ -404,12 +404,38 @@ app.post('/api/chat', async (req, res) => {
 
         // ★★ LLM 티커 Fallback (비주류 종목 등 로컬 DB에 없을 때) ★★
         if (!resolvedInfo && intent.type === 'stock' && intent.ticker && intent.ticker !== 'UNKNOWN') {
-            console.log(`[API /chat] 💡 로컬 DB 실패. LLM intent.ticker(${intent.ticker}) fallback 사용`);
-            resolvedInfo = {
-                ticker: intent.ticker,
-                name: intent.resolved_name || intent.ticker,
-                market: intent.ticker.endsWith('.KS') || intent.ticker.endsWith('.KQ') ? 'KR' : 'US'
-            };
+            // 사용자가 직접 명시적 대문자 티커를 입력한 경우에만 GPT ticker 신뢰
+            // 한국어 회사명만 입력한 경우 GPT가 잘못된 티커를 추측(할루시네이션)할 수 있으므로 searchTicker로 먼저 검증
+            const hasExplicitTicker = /\b[A-Z]{2,5}\b/.test(text);
+            if (hasExplicitTicker) {
+                console.log(`[API /chat] 💡 명시적 대문자 티커 발견. LLM intent.ticker(${intent.ticker}) 사용`);
+                resolvedInfo = {
+                    ticker: intent.ticker,
+                    name: intent.name || intent.resolved_name || intent.ticker,
+                    market: intent.ticker.endsWith('.KS') || intent.ticker.endsWith('.KQ') ? 'KR' : 'US'
+                };
+            } else {
+                // 한국어/영문 회사명 입력 → searchTicker로 검색 후 고신뢰도 결과만 사용
+                const searchQuery = intent.name || text;
+                console.log(`[API /chat] 🔍 한국어 회사명 감지. GPT ticker(${intent.ticker}) 검증 보류, searchTicker: "${searchQuery}"`);
+                try {
+                    const searched = await searchTicker(searchQuery);
+                    if (searched.auto && searched.ticker) {
+                        console.log(`[API /chat] ✅ searchTicker 자동 선택: ${searched.ticker} (${searched.name})`);
+                        resolvedInfo = {
+                            ticker: searched.ticker,
+                            name: searched.name || searched.ticker,
+                            market: searched.ticker.endsWith('.KS') || searched.ticker.endsWith('.KQ') ? 'KR' : 'US'
+                        };
+                    } else {
+                        console.log(`[API /chat] ⚠️ searchTicker 미확정. 할루시네이션 방지를 위해 candidates fallback으로 넘김`);
+                        // resolvedInfo remains null → suggestCandidates fallback으로 처리
+                    }
+                } catch (e) {
+                    console.log(`[API /chat] ⚠️ searchTicker 오류(${e.message}). candidates fallback으로 처리`);
+                    // resolvedInfo remains null
+                }
+            }
         }
 
         // HIGH: 올바른 결과가 resolve 됨 -> 바로 분석 수행
