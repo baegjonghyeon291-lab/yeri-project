@@ -402,22 +402,27 @@ app.post('/api/chat', async (req, res) => {
         let resolvedInfo = resolveStock(text);
         const isStockIntent = hasStockKeyword(text) || (text.length <= 15 && !text.includes('안녕') && !text.includes('고마워'));
 
-        // ★★ LLM 티커 Fallback (비주류 종목 등 로컬 DB에 없을 때) ★★
-        if (!resolvedInfo && intent.type === 'stock' && intent.ticker && intent.ticker !== 'UNKNOWN') {
-            // 사용자가 직접 명시적 대문자 티커를 입력한 경우에만 GPT ticker 신뢰
-            // 한국어 회사명만 입력한 경우 GPT가 잘못된 티커를 추측(할루시네이션)할 수 있으므로 searchTicker로 먼저 검증
+        // searchTicker로 찾은 후보 목록 (candidates fallback에서 활용)
+        let searchTickerCandidates = [];
+
+        // ★★ 종목 미확인 → 4단계 폴백 파이프라인 ★★
+        if (!resolvedInfo && intent.type === 'stock') {
             const hasExplicitTicker = /\b[A-Z]{2,5}\b/.test(text);
-            if (hasExplicitTicker) {
-                console.log(`[API /chat] 💡 명시적 대문자 티커 발견. LLM intent.ticker(${intent.ticker}) 사용`);
+
+            // 1단계: 명시적 대문자 티커 + GPT intent.ticker → 신뢰
+            if (hasExplicitTicker && intent.ticker && intent.ticker !== 'UNKNOWN') {
+                console.log(`[API /chat] 💡 명시적 대문자 티커. LLM intent.ticker(${intent.ticker}) 사용`);
                 resolvedInfo = {
                     ticker: intent.ticker,
                     name: intent.name || intent.resolved_name || intent.ticker,
                     market: intent.ticker.endsWith('.KS') || intent.ticker.endsWith('.KQ') ? 'KR' : 'US'
                 };
-            } else {
-                // 한국어/영문 회사명 입력 → searchTicker로 검색 후 고신뢰도 결과만 사용
-                const searchQuery = intent.name || text;
-                console.log(`[API /chat] 🔍 한국어 회사명 감지. GPT ticker(${intent.ticker}) 검증 보류, searchTicker: "${searchQuery}"`);
+            }
+
+            // 2단계: searchTicker로 회사명 검색 (한국어/영문 회사명, 또는 GPT가 ticker=null 반환한 경우)
+            if (!resolvedInfo) {
+                const searchQuery = intent.name || extractCompanyName(text) || text;
+                console.log(`[API /chat] 🔍 searchTicker 검색: "${searchQuery}"`);
                 try {
                     const searched = await searchTicker(searchQuery);
                     if (searched.auto && searched.ticker) {
@@ -427,13 +432,20 @@ app.post('/api/chat', async (req, res) => {
                             name: searched.name || searched.ticker,
                             market: searched.ticker.endsWith('.KS') || searched.ticker.endsWith('.KQ') ? 'KR' : 'US'
                         };
+                    } else if (searched.found && searched.candidates?.length > 0) {
+                        console.log(`[API /chat] ⚠️ searchTicker 후보 ${searched.candidates.length}개 발견. candidates fallback 사용`);
+                        searchTickerCandidates = searched.candidates.map(c => ({
+                            ticker: c.ticker,
+                            name: c.name,
+                            market: c.ticker?.endsWith('.KS') || c.ticker?.endsWith('.KQ') ? 'KR' : 'US',
+                            corpCode: null,
+                            confidence: c.confidence || 0.5
+                        }));
                     } else {
-                        console.log(`[API /chat] ⚠️ searchTicker 미확정. 할루시네이션 방지를 위해 candidates fallback으로 넘김`);
-                        // resolvedInfo remains null → suggestCandidates fallback으로 처리
+                        console.log(`[API /chat] ⚠️ searchTicker 결과 없음. suggestCandidates fallback으로 처리`);
                     }
                 } catch (e) {
-                    console.log(`[API /chat] ⚠️ searchTicker 오류(${e.message}). candidates fallback으로 처리`);
-                    // resolvedInfo remains null
+                    console.log(`[API /chat] ⚠️ searchTicker 오류(${e.message})`);
                 }
             }
         }
@@ -611,6 +623,8 @@ app.post('/api/chat', async (req, res) => {
         }
 
         // ★★ MED/LOW인데 [티커/종목명] + [지표] + [얼마/몇] 패턴이면 지표 키워드 제거 후 재시도 ★★
+        const extracted = extractCompanyName(text) || text;
+        const suggestion = suggestCandidates(extracted);
         const FACT_METRIC_KEYWORDS = ['EPS', 'PER', 'PBR', 'ROE', 'ROA', 'RSI', 'FCF', 'BPS', 'PEG', 'D/E',
             '얼마', '몇', '수치', '값', '시총', '시가총액', '부채비율', '배당수익률', '배당', '순이익', '매출'];
         const FACT_SUFFIXES = ['얼마', '몇', '얼마야', '몇이야', '얼마예요', '몇이예요', '얼마냐', '얼마임'];
@@ -660,9 +674,9 @@ app.post('/api/chat', async (req, res) => {
             }
         }
 
-        // MED / LOW (유사 종목 및 대체 추천 종목 제시)
-        if ((suggestion.tier === 'MED' || suggestion.tier === 'LOW') && isStockIntent) {
-            let candidatesToShow = suggestion.candidates || [];
+        // MED / LOW (유사 종목 및 대체 추천 종목 제시) — searchTicker 결과 우선
+        if ((suggestion.tier === 'MED' || suggestion.tier === 'LOW' || searchTickerCandidates.length > 0) && isStockIntent) {
+            let candidatesToShow = searchTickerCandidates.length > 0 ? searchTickerCandidates : (suggestion.candidates || []);
             let prefixMsg = `입력하신 "${extracted}"에 해당하는 종목을 정확히 찾지 못했습니다.\n혹시 아래 종목 중 하나를 말씀하신 건가요?\n`;
 
             // LOW인데 후보조차 0개면 대중적인 인기 종목이라도 강제로 추천 리스트에 포함
