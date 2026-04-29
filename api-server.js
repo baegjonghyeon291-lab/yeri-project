@@ -795,6 +795,21 @@ app.get('/api/briefing/:userId', async (req, res) => {
     }
 });
 
+// POST /api/briefing/watchlist — 클라이언트가 티커 직접 전달 (Render 재시작으로 watchlist.json 유실돼도 동작)
+app.post('/api/briefing/watchlist', async (req, res) => {
+    try {
+        const { tickers } = req.body;
+        if (!Array.isArray(tickers) || tickers.length === 0) {
+            return res.json({ empty: true, report: '', list: [], message: '관심종목이 없습니다.' });
+        }
+        const list = tickers.map(t => String(t).toUpperCase());
+        const report = await generateWatchlistBriefing(list);
+        res.json({ report, list });
+    } catch (err) {
+        res.status(500).json({ error: `브리핑 생성 실패: ${err.message}` });
+    }
+});
+
 // ── 포트폴리오 관리 (자산관리) ─────────────────────────────────────
 
 // 기존 1회성 분석 (하위호환 유지)
