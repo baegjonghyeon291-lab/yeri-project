@@ -155,10 +155,13 @@ async function getPriceData(ticker) {
     }
 
     const data = await withFallback('PriceUS', [
+        // 1순위: Yahoo Finance (yf2) — 비주류 포함 가장 넓은 커버리지
+        ['Yahoo/yahoo-finance2', () => yahoo.getYahooPrice(ticker)],
+        // 2순위: TwelveData
         ['TwelveData', async () => {
             const key = process.env.TWELVEDATA_API_KEY;
             if (!key) return null;
-            const res = await axios.get(`https://api.twelvedata.com/quote?symbol=${ticker}&apikey=${key}`, { timeout: 2000 });
+            const res = await axios.get(`https://api.twelvedata.com/quote?symbol=${ticker}&apikey=${key}`, { timeout: 4000 });
             const d = res.data;
             if (d.status === 'error') return null;
             return {
@@ -175,14 +178,14 @@ async function getPriceData(ticker) {
                 source: 'TwelveData'
             };
         }],
-        // 2순위: Polygon
+        // 3순위: Polygon
         ['Polygon', async () => {
             const key = process.env.POLYGON_API_KEY;
             if (!key) return null;
-            const res = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?apiKey=${key}`, { timeout: 2000 });
+            const res = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev?apiKey=${key}`, { timeout: 4000 });
             const r = res.data.results?.[0];
             if (!r) return null;
-            const q = await axios.get(`https://api.polygon.io/v2/last/trade/${ticker}?apiKey=${key}`, { timeout: 2000 }).catch(() => null);
+            const q = await axios.get(`https://api.polygon.io/v2/last/trade/${ticker}?apiKey=${key}`, { timeout: 4000 }).catch(() => null);
             const current = q?.data?.results?.p || r.c;
             return {
                 current: parseFloat(current),
@@ -192,13 +195,13 @@ async function getPriceData(ticker) {
                 volume: r.v, source: 'Polygon'
             };
         }],
-        // 3순위: RapidAPI Yahoo Finance — 추가 보강
+        // 4순위: RapidAPI Yahoo Finance
         ['RapidAPI/Yahoo', async () => {
             const key = process.env.RAPIDAPI_KEY;
             if (!key) return null;
             const res = await axios.get(`https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes?ticker=${ticker}`, {
                 headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': 'yahoo-finance15.p.rapidapi.com' },
-                timeout: 3000
+                timeout: 4000
             }).catch(() => null);
             const d = res?.data?.body?.[0];
             if (!d || !d.regularMarketPrice) return null;
@@ -216,8 +219,6 @@ async function getPriceData(ticker) {
                 source: 'RapidAPI/Yahoo'
             };
         }],
-        // 4순위: Yahoo Finance (yf2) — 한국 포함 보편적
-        ['Yahoo/yahoo-finance2', () => yahoo.getYahooPrice(ticker)]
     ]);
 
     if (data) toCache(cacheKey, data);
@@ -432,7 +433,9 @@ async function getFundamentals(ticker) {
     if (cached) return cached;
 
     const data = await withFallback('Fundamentals', [
-        // 1순위: FMP (가장 근본적이고 정확한 재무 데이터 API)
+        // 1순위: Yahoo Finance (yf2) — 비주류 소형주 포함 가장 넓은 커버리지
+        ['Yahoo/quoteSummary', () => yahoo.getYahooFundamentals(ticker)],
+        // 2순위: FMP (주요 종목 정확한 재무 데이터)
         ['FMP', async () => {
             const key = process.env.FMP_API_KEY;
             if (!key) return null;

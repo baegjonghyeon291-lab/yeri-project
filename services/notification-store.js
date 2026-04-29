@@ -78,11 +78,21 @@ function markAllAsRead(userId) {
     return updated;
 }
 
+function restoreNotifications(userId, notifications) {
+    if (!Array.isArray(notifications) || notifications.length === 0) return;
+    if (!all[userId] || all[userId].length === 0) {
+        all[userId] = notifications;
+        save();
+        console.log(`[NotificationStore] 복원: userId=${userId} count=${notifications.length}`);
+    }
+}
+
 init();
 
 module.exports = {
     addNotification,
     getNotifications,
     markAsRead,
-    markAllAsRead
+    markAllAsRead,
+    restoreNotifications
 };

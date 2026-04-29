@@ -8,7 +8,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true });
 
 const { evaluatePortfolioAlerts } = require('./services/portfolio-alert-engine');
-const { getNotifications, markAsRead, markAllAsRead } = require('./services/notification-store');
+const { getNotifications, markAsRead, markAllAsRead, restoreNotifications } = require('./services/notification-store');
 
 // ── 필수 환경변수 검증 (Render 배포 실패 방지) ─────────────────────
 const REQUIRED_ENV = ['OPENAI_API_KEY'];
@@ -1058,6 +1058,17 @@ app.get('/api/notifications/:userId', (req, res) => {
     try {
         const ns = getNotifications(req.params.userId);
         res.json({ notifications: ns });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/notifications/:userId/restore', (req, res) => {
+    try {
+        const { notifications } = req.body;
+        if (!Array.isArray(notifications)) return res.status(400).json({ error: 'notifications array required' });
+        restoreNotifications(req.params.userId, notifications);
+        res.json({ ok: true, count: notifications.length });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
