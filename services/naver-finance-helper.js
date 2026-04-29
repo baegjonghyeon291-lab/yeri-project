@@ -128,6 +128,44 @@ async function getNaverFundamentals(ticker) {
     }
 }
 
+/**
+ * 네이버 금융 실시간 시세 API — 한국 주식 가격 fallback
+ */
+async function getNaverPrice(ticker) {
+    const code = ticker.replace(/\.(KS|KQ)$/i, '');
+    if (!/^\d{6}$/.test(code)) return null;
+    try {
+        const res = await axios.get(
+            `https://m.stock.naver.com/api/stock/${code}/integration`,
+            { timeout: 8000 }
+        );
+        const d = res.data;
+        if (!d) return null;
+
+        const current = parseNum(d.dealTrendInfos?.[0]?.closePrice ?? d.stockEndPrice ?? d.closePrice);
+        const prevClose = parseNum(d.stockEndPrice ?? d.closePrice);
+        const changeAmt = parseNum(d.compareToPreviousClosePrice ?? d.fluctuationPrice);
+        const changePct = parseNum(d.fluctuationsRatio ?? d.compareToPreviousClosePriceRate);
+        const volume = parseNum(d.accumulatedTradingVolume ?? d.tradeVolume);
+
+        if (!current) return null;
+
+        const prev = prevClose || current;
+        return {
+            current,
+            prevClose: prev,
+            change: changeAmt ?? (current - prev),
+            changePct: changePct ?? parseFloat(((current - prev) / prev * 100).toFixed(2)),
+            volume: volume ?? 0,
+            source: 'Naver'
+        };
+    } catch (e) {
+        console.warn(`[Naver/Price] ${code} 조회 실패: ${e.message}`);
+        return null;
+    }
+}
+
 module.exports = {
-    getNaverFundamentals
+    getNaverFundamentals,
+    getNaverPrice,
 };

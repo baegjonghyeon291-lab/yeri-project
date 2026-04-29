@@ -147,7 +147,8 @@ async function getPriceData(ticker) {
     if (isKR) {
         const yfTicker = /^[0-9]{6}$/.test(ticker) ? `${ticker}.KS` : ticker;
         const data = await withFallback('PriceKR', [
-            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooPrice(yfTicker)]
+            ['Yahoo/yahoo-finance2 (KR)', () => yahoo.getYahooPrice(yfTicker)],
+            ['Naver/Price (KR)', () => naver.getNaverPrice(yfTicker)],
         ]);
         if (data) toCache(cacheKey, data);
         return data;

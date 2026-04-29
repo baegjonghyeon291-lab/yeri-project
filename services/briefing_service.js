@@ -121,10 +121,7 @@ async function generateDailyBriefingText(tickers, isManual = false) {
         }
     }
 
-    if (!rawResults.some(r => r.hasData)) {
-        return `데이터 수집에 문제가 있어요. 잠시 후 다시 시도해주세요.`;
-    }
-
+    // 데이터가 전혀 없어도 GPT에게 종목명 기반 브리핑 요청 (에러 반환하지 않음)
     const dataBlock = rawResults.map(s => buildStockBlock(s)).join('\n\n---\n\n');
     const hasNewsCount = rawResults.filter(s => s.hasNews).length;
     const intro = isManual ? '관심종목 브리핑' : '오늘 아침 관심종목 브리핑';
