@@ -35,9 +35,10 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
         const priceAbove = safeNum(alerts.priceAbove);
         if (priceAbove != null && currentPrice >= priceAbove) {
             if (canFireAlert(userId, ticker, 'priceAbove', 24)) {
+                const upside = ((currentPrice - priceAbove) / priceAbove * 100).toFixed(1);
                 addNotification(userId, {
                     type: 'PRICE_ABOVE',
-                    message: `📈 ${ticker} 현재가가 설정한 돌파 가격($${priceAbove})을 돌파했습니다! (현재 $${currentPrice.toFixed(2)})`,
+                    message: `${ticker} 목표가 $${priceAbove} 돌파!\n현재가 $${currentPrice.toFixed(2)} (+${upside}% 초과)\n매수단가 $${avgPrice.toFixed(2)} → 수익률 ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%\n익절 타이밍인지 점검해 보세요.`,
                     ticker: ticker
                 });
                 recordAlertFired(userId, ticker, 'priceAbove');
@@ -50,7 +51,7 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
             if (canFireAlert(userId, ticker, 'priceBelow', 24)) {
                 addNotification(userId, {
                     type: 'PRICE_BELOW',
-                    message: `🚨 ${ticker} 현재가가 설정한 하락 가격($${priceBelow})을 이탈했습니다. (현재 $${currentPrice.toFixed(2)})`,
+                    message: `${ticker} 이탈가 $${priceBelow} 하락!\n현재가 $${currentPrice.toFixed(2)} — 설정가 하회\n수익률 ${pnlPct.toFixed(2)}% / 평가손익 $${pnlAmount.toFixed(2)}\n손절 또는 추가 매수 여부를 검토하세요.`,
                     ticker: ticker
                 });
                 recordAlertFired(userId, ticker, 'priceBelow');
@@ -63,7 +64,7 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
             if (canFireAlert(userId, ticker, 'takeProfitPct', 24)) {
                 addNotification(userId, {
                     type: 'TAKE_PROFIT',
-                    message: `🎉 대공개! ${ticker} 수익률이 목표치인 +${takeProfitPct}%를 달성했습니다! (현재 +${pnlPct.toFixed(2)}%)`,
+                    message: `${ticker} 수익률 목표 +${takeProfitPct}% 달성!\n현재 수익률 +${pnlPct.toFixed(2)}% (목표 초과 +${(pnlPct - takeProfitPct).toFixed(2)}%)\n평가금액 $${(currentPrice * holding.quantity).toFixed(2)} / 평가손익 +$${pnlAmount.toFixed(2)}\n부분 익절 또는 목표 상향을 고려해 보세요.`,
                     ticker: ticker
                 });
                 recordAlertFired(userId, ticker, 'takeProfitPct');
@@ -76,7 +77,7 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
             if (canFireAlert(userId, ticker, 'stopLossPct', 24)) {
                 addNotification(userId, {
                     type: 'STOP_LOSS',
-                    message: `🚨 긴급: ${ticker} 수익률이 설정한 하한선 ${stopLossPct}% 이하로 떨어졌습니다. (현재 ${pnlPct.toFixed(2)}%)`,
+                    message: `${ticker} 손절 라인 ${stopLossPct}% 도달!\n현재 수익률 ${pnlPct.toFixed(2)}% — 하한선 돌파\n현재가 $${currentPrice.toFixed(2)} / 평가손익 $${pnlAmount.toFixed(2)}\n손절 여부를 즉시 검토하세요.`,
                     ticker: ticker
                 });
                 recordAlertFired(userId, ticker, 'stopLossPct');
@@ -90,7 +91,7 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
             if (canFireAlert(userId, ticker, 'totalValueAbove', 24)) {
                 addNotification(userId, {
                     type: 'TOTAL_VALUE',
-                    message: `💰 달성! ${ticker} 보유 종목의 총 평가금액이 목표치인 $${totalValueAbove.toLocaleString()}을 돌파했습니다! (현재 $${currentTotalValue.toLocaleString(undefined, {maximumFractionDigits:2})})`,
+                    message: `${ticker} 평가금액 목표 달성!\n목표 $${totalValueAbove.toLocaleString()} → 현재 $${currentTotalValue.toFixed(2)}\n수익률 ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% / 손익 $${pnlAmount.toFixed(2)}\n포트폴리오 리밸런싱을 고려해 보세요.`,
                     ticker: ticker
                 });
                 recordAlertFired(userId, ticker, 'totalValueAbove');
@@ -103,7 +104,7 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
             if (canFireAlert(userId, ticker, 'maxWeight', 24)) {
                 addNotification(userId, {
                     type: 'WEIGHT_WARNING',
-                    message: `⚠️ ${ticker} 비중이 설정한 한도(${maxWeight}%)를 초과했습니다. 포트폴리오 리스크 관리가 필요할 수 있습니다. (현재 비중: ${weightPct.toFixed(1)}%)`,
+                    message: `${ticker} 포트폴리오 비중 초과!\n현재 비중 ${weightPct.toFixed(1)}% (한도 ${maxWeight}%)\n집중 리스크 발생 — 분산 투자를 검토하세요.`,
                     ticker: ticker
                 });
                 recordAlertFired(userId, ticker, 'maxWeight');
@@ -116,7 +117,7 @@ function evaluatePortfolioAlerts(userId, analyzedHoldings) {
                 if (canFireAlert(userId, ticker, `badge_${badge}`, 12)) {
                     addNotification(userId, {
                         type: 'STATUS_WARNING',
-                        message: `🚨 ${ticker}의 상태 배지가 [${badge}](으)로 악화되었습니다. 예리의 대응 전략을 확인해 보세요!`,
+                        message: `${ticker} 상태 [${badge}] 악화!\n현재가 $${currentPrice.toFixed(2)} / 수익률 ${pnlPct.toFixed(2)}%\n포트폴리오 페이지에서 대응 전략을 확인하세요.`,
                         ticker: ticker
                     });
                     recordAlertFired(userId, ticker, `badge_${badge}`);
